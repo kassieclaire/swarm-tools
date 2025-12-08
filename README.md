@@ -20,13 +20,18 @@ This plugin provides structured, validated tools for multi-agent workflows in Op
 bun add opencode-swarm-plugin
 ```
 
-Add to your `opencode.jsonc`:
+Copy the plugin to your OpenCode plugins directory:
 
-```json
-{
-  "plugins": ["opencode-swarm-plugin"]
-}
+```bash
+cp node_modules/opencode-swarm-plugin/dist/plugin.js ~/.config/opencode/plugin/swarm.js
 ```
+
+Plugins are automatically loaded from `~/.config/opencode/plugin/` - no config file changes needed.
+
+> **Note:** The package has two entry points:
+>
+> - `dist/index.js` - Full library exports (schemas, errors, utilities)
+> - `dist/plugin.js` - Plugin entry point that only exports the `plugin` function for OpenCode
 
 ## Prerequisites
 
@@ -54,30 +59,30 @@ bd --version
 
 | Tool                | Description                                                         |
 | ------------------- | ------------------------------------------------------------------- |
-| `beads:create`      | Create a new bead with type-safe validation                         |
-| `beads:create_epic` | Create epic with subtasks in one atomic operation                   |
-| `beads:query`       | Query beads with filters (replaces `bd list`, `bd ready`, `bd wip`) |
-| `beads:update`      | Update bead status/description/priority                             |
-| `beads:close`       | Close a bead with reason                                            |
-| `beads:start`       | Mark bead as in-progress (shortcut)                                 |
-| `beads:ready`       | Get next ready bead (unblocked, highest priority)                   |
-| `beads:sync`        | Sync beads to git and push (MANDATORY at session end)               |
-| `beads:link_thread` | Link bead to Agent Mail thread                                      |
+| `beads_create`      | Create a new bead with type-safe validation                         |
+| `beads_create_epic` | Create epic with subtasks in one atomic operation                   |
+| `beads_query`       | Query beads with filters (replaces `bd list`, `bd ready`, `bd wip`) |
+| `beads_update`      | Update bead status/description/priority                             |
+| `beads_close`       | Close a bead with reason                                            |
+| `beads_start`       | Mark bead as in-progress (shortcut)                                 |
+| `beads_ready`       | Get next ready bead (unblocked, highest priority)                   |
+| `beads_sync`        | Sync beads to git and push (MANDATORY at session end)               |
+| `beads_link_thread` | Link bead to Agent Mail thread                                      |
 
 ### Agent Mail Tools
 
-| Tool                          | Description                                          |
-| ----------------------------- | ---------------------------------------------------- |
-| `agent-mail:init`             | Initialize session (ensure project + register agent) |
-| `agent-mail:send`             | Send message to other agents                         |
-| `agent-mail:inbox`            | Fetch inbox (CONTEXT-SAFE: bodies excluded, limit 5) |
-| `agent-mail:read_message`     | Fetch ONE message body by ID                         |
-| `agent-mail:summarize_thread` | Summarize thread (PREFERRED over fetching all)       |
-| `agent-mail:reserve`          | Reserve file paths for exclusive editing             |
-| `agent-mail:release`          | Release file reservations                            |
-| `agent-mail:ack`              | Acknowledge a message                                |
-| `agent-mail:search`           | Search messages (FTS5 syntax)                        |
-| `agent-mail:health`           | Check if Agent Mail server is running                |
+| Tool                         | Description                                          |
+| ---------------------------- | ---------------------------------------------------- |
+| `agentmail_init`             | Initialize session (ensure project + register agent) |
+| `agentmail_send`             | Send message to other agents                         |
+| `agentmail_inbox`            | Fetch inbox (CONTEXT-SAFE: bodies excluded, limit 5) |
+| `agentmail_read_message`     | Fetch ONE message body by ID                         |
+| `agentmail_summarize_thread` | Summarize thread (PREFERRED over fetching all)       |
+| `agentmail_reserve`          | Reserve file paths for exclusive editing             |
+| `agentmail_release`          | Release file reservations                            |
+| `agentmail_ack`              | Acknowledge a message                                |
+| `agentmail_search`           | Search messages (FTS5 syntax)                        |
+| `agentmail_health`           | Check if Agent Mail server is running                |
 
 ### Schemas (for structured outputs)
 
@@ -98,7 +103,7 @@ The plugin exports Zod schemas for validated agent responses:
 
 ```typescript
 // Create a bug report with priority
-await tools["beads:create"]({
+await tools["beads_create"]({
   title: "Fix login redirect loop",
   type: "bug",
   priority: 1,
@@ -110,7 +115,7 @@ await tools["beads:create"]({
 
 ```typescript
 // Create epic and all subtasks atomically (with rollback hints on failure)
-const result = await tools["beads:create_epic"]({
+const result = await tools["beads_create_epic"]({
   epic_title: "Implement user dashboard",
   epic_description: "New dashboard with metrics and activity feed",
   subtasks: [
@@ -137,24 +142,24 @@ const result = await tools["beads:create_epic"]({
 
 ```typescript
 // 1. Initialize session
-await tools["agent-mail:init"]({
+await tools["agentmail_init"]({
   project_path: "/Users/you/project",
   task_description: "Working on auth refactor",
 });
 // Returns: { agent: { name: "BlueLake", ... } }
 
 // 2. Reserve files before editing
-await tools["agent-mail:reserve"]({
+await tools["agentmail_reserve"]({
   paths: ["src/auth/**", "src/middleware/auth.ts"],
   reason: "bd-abc123: Auth refactor",
   ttl_seconds: 3600,
 });
 
 // 3. Check inbox (bodies excluded by default)
-const messages = await tools["agent-mail:inbox"]({ limit: 5 });
+const messages = await tools["agentmail_inbox"]({ limit: 5 });
 
 // 4. Send status update to other agents
-await tools["agent-mail:send"]({
+await tools["agentmail_send"]({
   to: ["RedStone", "GreenCastle"],
   subject: "Auth refactor complete",
   body: "Finished updating the auth middleware. Ready for review.",
@@ -162,14 +167,14 @@ await tools["agent-mail:send"]({
 });
 
 // 5. Release reservations when done
-await tools["agent-mail:release"]({});
+await tools["agentmail_release"]({});
 ```
 
 ### Swarm Workflow
 
 ```typescript
 // 1. Create epic for the work
-const epic = await tools["beads:create_epic"]({
+const epic = await tools["beads_create_epic"]({
   epic_title: "Add export feature",
   subtasks: [
     { title: "Export to CSV", files: ["src/export/csv.ts"] },
@@ -180,13 +185,13 @@ const epic = await tools["beads:create_epic"]({
 
 // 2. Each parallel agent reserves its files
 // Agent 1 (BlueLake):
-await tools["agent-mail:reserve"]({
+await tools["agentmail_reserve"]({
   paths: ["src/export/csv.ts"],
   reason: `${epic.subtasks[0].id}: Export to CSV`,
 });
 
 // 3. Agents communicate via thread
-await tools["agent-mail:send"]({
+await tools["agentmail_send"]({
   to: ["Coordinator"],
   subject: "CSV export complete",
   body: "Implemented CSV export with streaming support.",
@@ -194,7 +199,7 @@ await tools["agent-mail:send"]({
 });
 
 // 4. Coordinator uses summarize_thread (not fetch all)
-const summary = await tools["agent-mail:summarize_thread"]({
+const summary = await tools["agentmail_summarize_thread"]({
   thread_id: epic.epic.id,
   include_examples: true,
 });
@@ -216,19 +221,19 @@ const summary = await tools["agent-mail:summarize_thread"]({
 
 ```typescript
 // WRONG: This can dump thousands of tokens into context
-const messages = await tools["agent-mail:inbox"]({
+const messages = await tools["agentmail_inbox"]({
   limit: 20,
   include_bodies: true, // Plugin prevents this
 });
 
 // RIGHT: Headers only, then fetch specific messages
-const headers = await tools["agent-mail:inbox"]({ limit: 5 });
-const importantMessage = await tools["agent-mail:read_message"]({
+const headers = await tools["agentmail_inbox"]({ limit: 5 });
+const importantMessage = await tools["agentmail_read_message"]({
   message_id: headers[0].id,
 });
 
 // BEST: Summarize threads instead of fetching all messages
-const summary = await tools["agent-mail:summarize_thread"]({
+const summary = await tools["agentmail_summarize_thread"]({
   thread_id: "bd-abc123",
 });
 ```
@@ -237,7 +242,7 @@ const summary = await tools["agent-mail:summarize_thread"]({
 
 The plugin enforces these limits regardless of input:
 
-- `agent-mail:inbox` - Max 5 messages, bodies always excluded
+- `agentmail_inbox` - Max 5 messages, bodies always excluded
 - Thread summaries use LLM mode for concise output
 - File reservations auto-track for cleanup
 
@@ -252,10 +257,10 @@ This plugin provides the primitives used by OpenCode's `/swarm` command:
 The `/swarm` command uses this plugin to:
 
 1. **Decompose** - Break task into subtasks using `TaskDecompositionSchema`
-2. **Create beads** - Use `beads:create_epic` for atomic issue creation
-3. **Initialize agents** - Each agent calls `agent-mail:init`
-4. **Reserve files** - Prevent conflicts with `agent-mail:reserve`
-5. **Coordinate** - Agents communicate via `agent-mail:send`
+2. **Create beads** - Use `beads_create_epic` for atomic issue creation
+3. **Initialize agents** - Each agent calls `agentmail_init`
+4. **Reserve files** - Prevent conflicts with `agentmail_reserve`
+5. **Coordinate** - Agents communicate via `agentmail_send`
 6. **Track status** - Use `SwarmStatusSchema` for progress
 7. **Evaluate** - Validate work with `EvaluationSchema`
 8. **Cleanup** - Release reservations and sync beads
@@ -274,7 +279,7 @@ import {
 } from "opencode-swarm-plugin";
 
 try {
-  await tools["agent-mail:reserve"]({ paths: ["src/index.ts"] });
+  await tools["agentmail_reserve"]({ paths: ["src/index.ts"] });
 } catch (error) {
   if (error instanceof FileReservationConflictError) {
     console.log("Conflicts:", error.conflicts);
