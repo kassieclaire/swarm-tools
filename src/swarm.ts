@@ -360,72 +360,65 @@ Before writing code:
 Begin work on your subtask now.`;
 
 /**
- * Simplified subtask prompt for Task subagents (V2 - coordinator-centric)
+ * Streamlined subtask prompt (V2) - still uses Agent Mail and beads
  *
- * This prompt is designed for agents that DON'T have access to Agent Mail or beads tools.
- * The coordinator handles all coordination - subagents just do the work and return results.
- *
- * Key differences from V1:
- * - No Agent Mail instructions (subagents can't use it)
- * - No beads instructions (subagents can't use it)
- * - Expects structured JSON response for coordinator to process
+ * This is a cleaner version of SUBTASK_PROMPT that's easier to parse.
+ * Agents MUST use Agent Mail for communication and beads for tracking.
  */
-export const SUBTASK_PROMPT_V2 = `You are working on a subtask as part of a larger project.
+export const SUBTASK_PROMPT_V2 = `You are a swarm agent working on: **{subtask_title}**
 
-## Your Task
-**Title**: {subtask_title}
+## Identity
+- **Bead ID**: {bead_id}
+- **Epic ID**: {epic_id}
 
+## Task
 {subtask_description}
 
-## Files to Modify
+## Files (exclusive reservation)
 {file_list}
 
-**IMPORTANT**: Only modify the files listed above. Do not create new files unless absolutely necessary for the task.
+Only modify these files. Need others? Message the coordinator.
 
 ## Context
 {shared_context}
 
-## Instructions
+## MANDATORY: Use These Tools
 
-1. **Read first** - Understand the current state of the files before making changes
-2. **Plan your approach** - Think through what changes are needed
-3. **Make the changes** - Implement the required functionality
-4. **Verify** - Check that your changes work (run tests/typecheck if applicable)
-
-## When Complete
-
-After finishing your work, provide a summary in this format:
-
-\`\`\`json
-{
-  "success": true,
-  "summary": "Brief description of what you accomplished",
-  "files_modified": ["list", "of", "files", "you", "changed"],
-  "files_created": ["any", "new", "files"],
-  "issues_found": ["any problems or concerns discovered"],
-  "tests_passed": true,
-  "notes": "Any additional context for the coordinator"
-}
+### Agent Mail - communicate with the swarm
+\`\`\`typescript
+// Report progress, ask questions, announce blockers
+agentmail_send({
+  to: ["coordinator"],
+  subject: "Progress update",
+  body: "What you did or need",
+  thread_id: "{epic_id}"
+})
 \`\`\`
 
-If you encounter a blocker you cannot resolve, return:
+### Beads - track your work
+- **Blocked?** \`beads_update({ id: "{bead_id}", status: "blocked" })\`
+- **Found bug?** \`beads_create({ title: "Bug description", type: "bug" })\`
+- **Done?** \`swarm_complete({ bead_id: "{bead_id}", summary: "What you did", files_touched: [...] })\`
 
-\`\`\`json
-{
-  "success": false,
-  "summary": "What you attempted",
-  "blocker": "Description of what's blocking you",
-  "files_modified": [],
-  "suggestions": ["possible", "solutions"]
-}
-\`\`\`
+## Workflow
 
-Begin work now.`;
+1. **Read** the files first
+2. **Plan** your approach (message coordinator if complex)
+3. **Implement** the changes
+4. **Verify** (typecheck, tests)
+5. **Report** progress via Agent Mail
+6. **Complete** with swarm_complete when done
+
+**Never work silently.** Communicate progress and blockers immediately.
+
+Begin now.`;
 
 /**
  * Format the V2 subtask prompt for a specific agent
  */
 export function formatSubtaskPromptV2(params: {
+  bead_id: string;
+  epic_id: string;
   subtask_title: string;
   subtask_description: string;
   files: string[];
@@ -434,15 +427,17 @@ export function formatSubtaskPromptV2(params: {
   const fileList =
     params.files.length > 0
       ? params.files.map((f) => `- \`${f}\``).join("\n")
-      : "(no specific files assigned - use your judgment)";
+      : "(no specific files - use judgment)";
 
-  return SUBTASK_PROMPT_V2.replace("{subtask_title}", params.subtask_title)
+  return SUBTASK_PROMPT_V2.replace(/{bead_id}/g, params.bead_id)
+    .replace(/{epic_id}/g, params.epic_id)
+    .replace("{subtask_title}", params.subtask_title)
     .replace(
       "{subtask_description}",
       params.subtask_description || "(see title)",
     )
     .replace("{file_list}", fileList)
-    .replace("{shared_context}", params.shared_context || "(none provided)");
+    .replace("{shared_context}", params.shared_context || "(none)");
 }
 
 /**
@@ -1507,15 +1502,15 @@ export const swarm_subtask_prompt = tool({
 /**
  * Prepare a subtask for spawning with Task tool (V2 prompt)
  *
- * This is a simplified tool for coordinators that generates a prompt using
- * the V2 template (no Agent Mail/beads instructions - coordinator handles coordination).
+ * Generates a streamlined prompt that tells agents to USE Agent Mail and beads.
  * Returns JSON that can be directly used with Task tool.
  */
 export const swarm_spawn_subtask = tool({
   description:
-    "Prepare a subtask for spawning with Task tool. Returns prompt and metadata for coordinator to use.",
+    "Prepare a subtask for spawning. Returns prompt with Agent Mail/beads instructions.",
   args: {
     bead_id: tool.schema.string().describe("Subtask bead ID"),
+    epic_id: tool.schema.string().describe("Parent epic bead ID"),
     subtask_title: tool.schema.string().describe("Subtask title"),
     subtask_description: tool.schema
       .string()
@@ -1531,6 +1526,8 @@ export const swarm_spawn_subtask = tool({
   },
   async execute(args) {
     const prompt = formatSubtaskPromptV2({
+      bead_id: args.bead_id,
+      epic_id: args.epic_id,
       subtask_title: args.subtask_title,
       subtask_description: args.subtask_description || "",
       files: args.files,
@@ -1541,6 +1538,7 @@ export const swarm_spawn_subtask = tool({
       {
         prompt,
         bead_id: args.bead_id,
+        epic_id: args.epic_id,
         files: args.files,
       },
       null,

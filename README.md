@@ -441,38 +441,6 @@ Copy the example command to your OpenCode config:
 cp examples/commands/swarm.md ~/.config/opencode/command/
 ```
 
-Or create `~/.config/opencode/command/swarm.md`:
-
-```markdown
----
-description: Decompose task into parallel subtasks and coordinate agents
----
-
-You are a swarm coordinator. Break down the following task into parallel subtasks.
-
-## Task
-
-$ARGUMENTS
-
-## Instructions
-
-1. Use `swarm_decompose` to generate a decomposition prompt
-2. Create an epic with subtasks using `beads_create_epic`
-3. For each subtask, use `swarm_spawn_subtask` to get a simple prompt
-4. Spawn parallel Task agents with those prompts
-5. When agents complete, use `swarm_complete_subtask` to handle results
-6. Close the epic and sync beads when all subtasks complete
-
-## Coordinator Responsibilities
-
-- **You** reserve files before spawning agents (subagents can't use Agent Mail)
-- **You** mark beads in_progress before spawning
-- **You** handle completion: close beads, release files, create issue beads
-- Subagents just do the work and return JSON results
-
-Begin decomposition now.
-```
-
 ### Usage
 
 ```
@@ -483,10 +451,21 @@ Begin decomposition now.
 
 1. **Decompose** - `swarm_decompose` breaks task into subtasks with file assignments
 2. **Create beads** - `beads_create_epic` creates epic + subtasks atomically
-3. **Spawn agents** - `swarm_spawn_subtask` generates simple prompts (no coordination instructions)
-4. **Parallel work** - Task agents do work, return structured JSON
-5. **Handle completion** - `swarm_complete_subtask` closes beads, creates issue beads
-6. **Cleanup** - `beads_sync` pushes to git
+3. **Spawn agents** - `swarm_spawn_subtask` generates prompts WITH Agent Mail/beads instructions
+4. **Parallel work** - Subagents use Agent Mail to communicate, beads to track progress
+5. **Coordination** - Agents report progress, ask questions, announce blockers via Agent Mail
+6. **Completion** - Agents use `swarm_complete` when done
+7. **Cleanup** - `beads_sync` pushes to git
+
+### Subagent Capabilities
+
+Spawned subagents have **full access** to all plugin tools:
+
+- **Agent Mail** - `agentmail_send`, `agentmail_inbox`, `agentmail_reserve`, etc.
+- **Beads** - `beads_update`, `beads_create`, `swarm_complete`
+- All standard OpenCode tools
+
+The prompts tell agents to actively communicate and coordinate.
 
 ## Error Handling
 

@@ -959,10 +959,12 @@ describe("Graceful Degradation", () => {
 // Coordinator-Centric Swarm Tools (V2)
 // ============================================================================
 
-describe("Coordinator-Centric Swarm Tools", () => {
+describe("Swarm Prompt V2 (with Agent Mail/Beads)", () => {
   describe("formatSubtaskPromptV2", () => {
     it("generates correct prompt with all fields", () => {
       const result = formatSubtaskPromptV2({
+        bead_id: "bd-123.1",
+        epic_id: "bd-123",
         subtask_title: "Add OAuth provider",
         subtask_description: "Configure Google OAuth in the auth config",
         files: ["src/auth/google.ts", "src/auth/config.ts"],
@@ -982,16 +984,15 @@ describe("Coordinator-Centric Swarm Tools", () => {
       // Check shared context is included
       expect(result).toContain("We are using NextAuth.js v5");
 
-      // Check expected sections exist
-      expect(result).toContain("## Your Task");
-      expect(result).toContain("## Files to Modify");
-      expect(result).toContain("## Context");
-      expect(result).toContain("## Instructions");
-      expect(result).toContain("## When Complete");
+      // Check bead/epic IDs are substituted
+      expect(result).toContain("bd-123.1");
+      expect(result).toContain("bd-123");
     });
 
     it("handles missing optional fields", () => {
       const result = formatSubtaskPromptV2({
+        bead_id: "bd-456.1",
+        epic_id: "bd-456",
         subtask_title: "Simple task",
         subtask_description: "",
         files: [],
@@ -1004,16 +1005,16 @@ describe("Coordinator-Centric Swarm Tools", () => {
       expect(result).toContain("(see title)");
 
       // Check fallback for empty files
-      expect(result).toContain(
-        "(no specific files assigned - use your judgment)",
-      );
+      expect(result).toContain("(no specific files - use judgment)");
 
       // Check fallback for missing context
-      expect(result).toContain("(none provided)");
+      expect(result).toContain("(none)");
     });
 
     it("handles files with special characters", () => {
       const result = formatSubtaskPromptV2({
+        bead_id: "bd-789.1",
+        epic_id: "bd-789",
         subtask_title: "Handle paths",
         subtask_description: "Test file paths",
         files: [
@@ -1030,51 +1031,39 @@ describe("Coordinator-Centric Swarm Tools", () => {
   describe("SUBTASK_PROMPT_V2", () => {
     it("contains expected sections", () => {
       // Check all main sections are present in the template
-      expect(SUBTASK_PROMPT_V2).toContain("## Your Task");
+      expect(SUBTASK_PROMPT_V2).toContain("## Task");
       expect(SUBTASK_PROMPT_V2).toContain("{subtask_title}");
       expect(SUBTASK_PROMPT_V2).toContain("{subtask_description}");
 
-      expect(SUBTASK_PROMPT_V2).toContain("## Files to Modify");
+      expect(SUBTASK_PROMPT_V2).toContain("## Files");
       expect(SUBTASK_PROMPT_V2).toContain("{file_list}");
 
       expect(SUBTASK_PROMPT_V2).toContain("## Context");
       expect(SUBTASK_PROMPT_V2).toContain("{shared_context}");
 
-      expect(SUBTASK_PROMPT_V2).toContain("## Instructions");
-      expect(SUBTASK_PROMPT_V2).toContain("Read first");
-      expect(SUBTASK_PROMPT_V2).toContain("Plan your approach");
-      expect(SUBTASK_PROMPT_V2).toContain("Make the changes");
-      expect(SUBTASK_PROMPT_V2).toContain("Verify");
-
-      expect(SUBTASK_PROMPT_V2).toContain("## When Complete");
-      expect(SUBTASK_PROMPT_V2).toContain('"success"');
-      expect(SUBTASK_PROMPT_V2).toContain('"summary"');
-      expect(SUBTASK_PROMPT_V2).toContain('"files_modified"');
+      expect(SUBTASK_PROMPT_V2).toContain("## Workflow");
     });
 
-    it("does NOT contain Agent Mail instructions", () => {
-      // V2 prompt is for coordinator-centric model where subagents don't use Agent Mail
-      expect(SUBTASK_PROMPT_V2).not.toContain("Agent Mail");
-      expect(SUBTASK_PROMPT_V2).not.toContain("agentmail_");
-      expect(SUBTASK_PROMPT_V2).not.toContain("agent_name");
-      expect(SUBTASK_PROMPT_V2).not.toContain("send_message");
+    it("DOES contain Agent Mail instructions", () => {
+      // V2 prompt tells agents to USE Agent Mail
+      expect(SUBTASK_PROMPT_V2).toContain("Agent Mail");
+      expect(SUBTASK_PROMPT_V2).toContain("agentmail_send");
+      expect(SUBTASK_PROMPT_V2).toContain("thread_id");
     });
 
-    it("does NOT contain beads instructions", () => {
-      // V2 prompt is for coordinator-centric model where subagents don't manage beads
-      expect(SUBTASK_PROMPT_V2).not.toContain("bead_id");
-      expect(SUBTASK_PROMPT_V2).not.toContain("epic_id");
-      expect(SUBTASK_PROMPT_V2).not.toContain("bd update");
-      expect(SUBTASK_PROMPT_V2).not.toContain("bd close");
-      expect(SUBTASK_PROMPT_V2).not.toContain("swarm_progress");
-      expect(SUBTASK_PROMPT_V2).not.toContain("swarm_complete");
+    it("DOES contain beads instructions", () => {
+      // V2 prompt tells agents to USE beads
+      expect(SUBTASK_PROMPT_V2).toContain("{bead_id}");
+      expect(SUBTASK_PROMPT_V2).toContain("{epic_id}");
+      expect(SUBTASK_PROMPT_V2).toContain("beads_update");
+      expect(SUBTASK_PROMPT_V2).toContain("beads_create");
+      expect(SUBTASK_PROMPT_V2).toContain("swarm_complete");
     });
 
-    it("expects structured JSON response from subagent", () => {
-      // The prompt should instruct agents to return structured JSON
-      expect(SUBTASK_PROMPT_V2).toContain("```json");
-      expect(SUBTASK_PROMPT_V2).toContain('"success"');
-      expect(SUBTASK_PROMPT_V2).toContain('"blocker"');
+    it("instructs agents to communicate", () => {
+      expect(SUBTASK_PROMPT_V2).toContain("Never work silently");
+      expect(SUBTASK_PROMPT_V2).toContain("Report progress");
+      expect(SUBTASK_PROMPT_V2).toContain("coordinator");
     });
   });
 });
