@@ -17,30 +17,26 @@ Break complex tasks into parallel subtasks, spawn agents to work on them, and co
 
 ## Quick Start
 
-### 1. Install Dependencies
-
 ```bash
-# OpenCode (plugin host)
+# 1. Install required dependencies
 brew install sst/tap/opencode
-
-# Beads CLI (issue tracking)
 go install github.com/steveyegge/beads/cmd/bd@latest
 
-# Agent Mail (multi-agent coordination)
-go install github.com/joelhooks/agent-mail/cmd/agent-mail@latest
+# 2. Install the plugin globally
+npm install -g opencode-swarm-plugin
 
-# CASS (cross-agent session search)
-# See: https://github.com/Dicklesworthstone/cass
+# 3. Run setup (creates plugin wrapper, /swarm command, @swarm-planner agent)
+swarm setup
 
-# UBS (bug scanner)
-# See: https://github.com/joelhooks/ubs
+# 4. Check all dependencies
+swarm doctor
 
-# semantic-memory (learning persistence)
-npm install -g semantic-memory
-
-# Redis (rate limiting - optional, falls back to SQLite)
-brew install redis
+# 5. Initialize beads in your project
+cd your-project
+bd init
 ```
+
+That's it! Now use `/swarm "your task"` in OpenCode.
 
 ### 2. Install Plugin
 
@@ -174,17 +170,10 @@ bd init
 ### Verify Installation
 
 ```bash
-# Required
-opencode --version
-bd --version
-
-# Optional - check what's available
-agent-mail --version        # Multi-agent coordination
-cass health                 # Session search
-ubs doctor                  # Bug scanner
-semantic-memory stats       # Learning persistence
-redis-cli ping              # Rate limiting
+swarm doctor
 ```
+
+This checks all dependencies and shows install commands for anything missing.
 
 ## Tools Reference
 
