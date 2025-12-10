@@ -53,7 +53,7 @@ export const EvaluationSchema = z.object({
   criteria: z.record(z.string(), CriterionEvaluationSchema),
   overall_feedback: z.string(),
   retry_suggestion: z.string().nullable(),
-  timestamp: z.string().optional(), // ISO-8601
+  timestamp: z.string().datetime({ offset: true }).optional(), // ISO-8601 with timezone
 });
 export type Evaluation = z.infer<typeof EvaluationSchema>;
 
@@ -91,7 +91,7 @@ export const WeightedEvaluationSchema = z.object({
   criteria: z.record(z.string(), WeightedCriterionEvaluationSchema),
   overall_feedback: z.string(),
   retry_suggestion: z.string().nullable(),
-  timestamp: z.string().optional(), // ISO-8601
+  timestamp: z.string().datetime({ offset: true }).optional(), // ISO-8601 with timezone
   /** Average weight across all criteria (indicates overall confidence) */
   average_weight: z.number().min(0).max(1).optional(),
   /** Raw score before weighting */

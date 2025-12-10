@@ -1343,6 +1343,19 @@ export const swarm_validate_decomposition = tool({
       for (let i = 0; i < validated.subtasks.length; i++) {
         const deps = validated.subtasks[i].dependencies;
         for (const dep of deps) {
+          // Check bounds first
+          if (dep < 0 || dep >= validated.subtasks.length) {
+            return JSON.stringify(
+              {
+                valid: false,
+                error: `Invalid dependency: subtask ${i} depends on ${dep}, but only ${validated.subtasks.length} subtasks exist (indices 0-${validated.subtasks.length - 1})`,
+                hint: "Dependency index is out of bounds",
+              },
+              null,
+              2,
+            );
+          }
+          // Check forward references
           if (dep >= i) {
             return JSON.stringify(
               {

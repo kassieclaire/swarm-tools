@@ -73,20 +73,35 @@ async function resolveSemanticMemoryCommand(): Promise<string[]> {
 async function execSemanticMemory(
   args: string[],
 ): Promise<{ exitCode: number; stdout: Buffer; stderr: Buffer }> {
-  const cmd = await resolveSemanticMemoryCommand();
-  const fullCmd = [...cmd, ...args];
+  try {
+    const cmd = await resolveSemanticMemoryCommand();
+    const fullCmd = [...cmd, ...args];
 
-  // Use Bun.spawn for dynamic command arrays
-  const proc = Bun.spawn(fullCmd, {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+    // Use Bun.spawn for dynamic command arrays
+    const proc = Bun.spawn(fullCmd, {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
 
-  const stdout = Buffer.from(await new Response(proc.stdout).arrayBuffer());
-  const stderr = Buffer.from(await new Response(proc.stderr).arrayBuffer());
-  const exitCode = await proc.exited;
+    try {
+      const stdout = Buffer.from(await new Response(proc.stdout).arrayBuffer());
+      const stderr = Buffer.from(await new Response(proc.stderr).arrayBuffer());
+      const exitCode = await proc.exited;
 
-  return { exitCode, stdout, stderr };
+      return { exitCode, stdout, stderr };
+    } finally {
+      // Ensure process cleanup
+      proc.kill();
+    }
+  } catch (error) {
+    // Return structured error result on exceptions
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      exitCode: 1,
+      stdout: Buffer.from(""),
+      stderr: Buffer.from(`Error executing semantic-memory: ${errorMessage}`),
+    };
+  }
 }
 
 /**
@@ -646,17 +661,22 @@ export async function createStorageWithFallback(
 // ============================================================================
 
 let globalStorage: LearningStorage | null = null;
+let globalStoragePromise: Promise<LearningStorage> | null = null;
 
 /**
  * Get or create the global storage instance
  *
  * Uses semantic-memory by default, with automatic fallback to in-memory.
+ * Prevents race conditions by storing the initialization promise.
  */
 export async function getStorage(): Promise<LearningStorage> {
-  if (!globalStorage) {
-    globalStorage = await createStorageWithFallback();
+  if (!globalStoragePromise) {
+    globalStoragePromise = createStorageWithFallback().then((storage) => {
+      globalStorage = storage;
+      return storage;
+    });
   }
-  return globalStorage;
+  return globalStoragePromise;
 }
 
 /**
@@ -676,4 +696,5 @@ export async function resetStorage(): Promise<void> {
     await globalStorage.close();
     globalStorage = null;
   }
+  globalStoragePromise = null;
 }

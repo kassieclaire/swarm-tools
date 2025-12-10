@@ -94,7 +94,7 @@ export const SwarmSpawnResultSchema = z.object({
   coordinator_name: z.string(), // Agent Mail name of coordinator
   thread_id: z.string(), // Agent Mail thread for this swarm
   agents: z.array(SpawnedAgentSchema),
-  started_at: z.string(), // ISO-8601
+  started_at: z.string().datetime({ offset: true }), // ISO-8601 with timezone
 });
 export type SwarmSpawnResult = z.infer<typeof SwarmSpawnResultSchema>;
 
@@ -109,7 +109,7 @@ export const AgentProgressSchema = z.object({
   message: z.string().optional(),
   files_touched: z.array(z.string()).optional(),
   blockers: z.array(z.string()).optional(),
-  timestamp: z.string(), // ISO-8601
+  timestamp: z.string().datetime({ offset: true }), // ISO-8601 with timezone
 });
 export type AgentProgress = z.infer<typeof AgentProgressSchema>;
 
@@ -124,6 +124,6 @@ export const SwarmStatusSchema = z.object({
   failed: z.number().int().min(0),
   blocked: z.number().int().min(0),
   agents: z.array(SpawnedAgentSchema),
-  last_update: z.string(), // ISO-8601
+  last_update: z.string().datetime({ offset: true }), // ISO-8601 with timezone
 });
 export type SwarmStatus = z.infer<typeof SwarmStatusSchema>;

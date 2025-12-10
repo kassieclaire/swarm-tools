@@ -42,15 +42,15 @@ export type BeadDependency = z.infer<typeof BeadDependencySchema>;
 export const BeadSchema = z.object({
   id: z
     .string()
-    .regex(/^[a-z0-9-]+-[a-z0-9]+(\.\d+)?$/, "Invalid bead ID format"),
+    .regex(/^[a-z0-9]+(-[a-z0-9]+)+(\.\d+)?$/, "Invalid bead ID format"),
   title: z.string().min(1, "Title required"),
   description: z.string().optional().default(""),
   status: BeadStatusSchema.default("open"),
   priority: z.number().int().min(0).max(3).default(2),
   issue_type: BeadTypeSchema.default("task"),
-  created_at: z.string(), // ISO-8601
-  updated_at: z.string().optional(),
-  closed_at: z.string().optional(),
+  created_at: z.string().datetime({ offset: true }), // ISO-8601 with timezone offset
+  updated_at: z.string().datetime({ offset: true }).optional(),
+  closed_at: z.string().datetime({ offset: true }).optional(),
   parent_id: z.string().optional(),
   dependencies: z.array(BeadDependencySchema).optional().default([]),
   metadata: z.record(z.string(), z.unknown()).optional(),

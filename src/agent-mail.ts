@@ -107,8 +107,10 @@ function loadSessionState(sessionID: string): AgentMailState | null {
 
 /**
  * Save session state to disk
+ *
+ * @returns true if save succeeded, false if failed
  */
-function saveSessionState(sessionID: string, state: AgentMailState): void {
+function saveSessionState(sessionID: string, state: AgentMailState): boolean {
   try {
     // Ensure directory exists
     if (!existsSync(SESSION_STATE_DIR)) {
@@ -116,9 +118,16 @@ function saveSessionState(sessionID: string, state: AgentMailState): void {
     }
     const path = getSessionStatePath(sessionID);
     writeFileSync(path, JSON.stringify(state, null, 2));
+    return true;
   } catch (error) {
     // Non-fatal - state just won't persist
-    console.warn(`[agent-mail] Could not save session state: ${error}`);
+    console.error(
+      `[agent-mail] CRITICAL: Could not save session state: ${error}`,
+    );
+    console.error(
+      `[agent-mail] Session state will not persist across CLI invocations!`,
+    );
+    return false;
   }
 }
 
@@ -718,6 +727,9 @@ export async function mcpCall<T>(
       // Track consecutive failures
       consecutiveFailures++;
 
+      // Check if error is retryable FIRST
+      const retryable = isRetryableError(error);
+
       // Check if we should attempt server restart
       if (
         consecutiveFailures >= RECOVERY_CONFIG.failureThreshold &&
@@ -734,15 +746,18 @@ export async function mcpCall<T>(
           if (restarted) {
             // Reset availability cache since server restarted
             agentMailAvailable = null;
-            // Don't count this attempt against retries - try again
-            attempt--;
-            continue;
+            // Only retry if the error was retryable in the first place
+            if (retryable) {
+              // Don't count this attempt against retries - try again
+              attempt--;
+              continue;
+            }
           }
         }
       }
 
-      // Check if error is retryable
-      if (!isRetryableError(error)) {
+      // If error is not retryable, throw immediately
+      if (!retryable) {
         console.warn(
           `[agent-mail] Non-retryable error for ${toolName}: ${lastError.message}`,
         );
@@ -1006,18 +1021,18 @@ export const agentmail_read_message = tool({
       message_id: args.message_id,
     });
 
-    // Fetch with body - we need to use fetch_inbox with specific message
-    // Since there's no get_message, we'll use search
+    // Fetch with body - fetch more messages to find the requested one
+    // Since there's no get_message endpoint, we need to fetch a reasonable batch
     const messages = await mcpCall<MessageHeader[]>("fetch_inbox", {
       project_key: state.projectKey,
       agent_name: state.agentName,
-      limit: 1,
+      limit: 50, // Fetch more messages to increase chance of finding the target
       include_bodies: true, // Only for single message fetch
     });
 
     const message = messages.find((m) => m.id === args.message_id);
     if (!message) {
-      return `Message ${args.message_id} not found`;
+      return `Message ${args.message_id} not found in recent 50 messages. Try using agentmail_search to locate it.`;
     }
 
     // Record successful request

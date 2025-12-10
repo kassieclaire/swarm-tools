@@ -122,9 +122,15 @@ export function getLimitsForEndpoint(endpoint: string): EndpointLimits {
   const perHourEnv =
     process.env[`OPENCODE_RATE_LIMIT_${upperEndpoint}_PER_HOUR`];
 
+  // Parse and validate env vars, fall back to defaults on NaN
+  const parsedPerMinute = perMinuteEnv ? parseInt(perMinuteEnv, 10) : NaN;
+  const parsedPerHour = perHourEnv ? parseInt(perHourEnv, 10) : NaN;
+
   return {
-    perMinute: perMinuteEnv ? parseInt(perMinuteEnv, 10) : defaults.perMinute,
-    perHour: perHourEnv ? parseInt(perHourEnv, 10) : defaults.perHour,
+    perMinute: Number.isNaN(parsedPerMinute)
+      ? defaults.perMinute
+      : parsedPerMinute,
+    perHour: Number.isNaN(parsedPerHour) ? defaults.perHour : parsedPerHour,
   };
 }
 
@@ -211,10 +217,11 @@ export class RedisRateLimiter implements RateLimiter {
     const windowDuration = this.getWindowDuration(window);
     const windowStart = now - windowDuration;
 
-    // Remove expired entries and count current ones in a pipeline
+    // Remove expired entries, count current ones, and fetch oldest in a single pipeline
     const pipeline = this.redis.pipeline();
     pipeline.zremrangebyscore(key, 0, windowStart);
     pipeline.zcard(key);
+    pipeline.zrange(key, 0, 0, "WITHSCORES"); // Fetch oldest entry atomically
 
     const results = await pipeline.exec();
     if (!results) {
@@ -225,11 +232,10 @@ export class RedisRateLimiter implements RateLimiter {
     const remaining = Math.max(0, limit - count);
     const allowed = count < limit;
 
-    // Calculate reset time based on oldest entry in window
+    // Calculate reset time based on oldest entry in window (fetched atomically)
     let resetAt = now + windowDuration;
     if (!allowed) {
-      // Get the oldest entry's timestamp to calculate precise reset
-      const oldest = await this.redis.zrange(key, 0, 0, "WITHSCORES");
+      const oldest = (results[2]?.[1] as string[]) || [];
       if (oldest.length >= 2) {
         const oldestTimestamp = parseInt(oldest[1], 10);
         resetAt = oldestTimestamp + windowDuration;

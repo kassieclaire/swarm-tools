@@ -55,6 +55,10 @@ export class BeadValidationError extends Error {
 
 /**
  * Build a bd create command from args
+ *
+ * Note: Bun's `$` template literal properly escapes arguments when passed as array.
+ * Each array element is treated as a separate argument, preventing shell injection.
+ * Example: ["bd", "create", "; rm -rf /"] becomes: bd create "; rm -rf /"
  */
 function buildCreateCommand(args: BeadCreateArgs): string[] {
   const parts = ["bd", "create", args.title];
@@ -250,25 +254,40 @@ export const beads_create_epic = tool({
 
       return JSON.stringify(result, null, 2);
     } catch (error) {
-      // Partial failure - return what was created with rollback hint
-      const rollbackHint = created
-        .map((b) => `bd close ${b.id} --reason "Rollback partial epic"`)
-        .join("\n");
+      // Partial failure - execute rollback automatically
+      const rollbackCommands: string[] = [];
 
-      const result: EpicCreateResult = {
-        success: false,
-        epic: created[0] || ({} as Bead),
-        subtasks: created.slice(1),
-        rollback_hint: rollbackHint,
-      };
+      for (const bead of created) {
+        try {
+          const closeCmd = [
+            "bd",
+            "close",
+            bead.id,
+            "--reason",
+            "Rollback partial epic",
+            "--json",
+          ];
+          await Bun.$`${closeCmd}`.quiet().nothrow();
+          rollbackCommands.push(
+            `bd close ${bead.id} --reason "Rollback partial epic"`,
+          );
+        } catch (rollbackError) {
+          // Log rollback failure but continue
+          console.error(`Failed to rollback bead ${bead.id}:`, rollbackError);
+        }
+      }
 
-      return JSON.stringify(
-        {
-          ...result,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        null,
-        2,
+      // Throw error with rollback info
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const rollbackInfo =
+        rollbackCommands.length > 0
+          ? `\n\nRolled back ${rollbackCommands.length} bead(s):\n${rollbackCommands.join("\n")}`
+          : "\n\nNo beads to rollback.";
+
+      throw new BeadError(
+        `Epic creation failed: ${errorMsg}${rollbackInfo}`,
+        "beads_create_epic",
+        1,
       );
     }
   },
@@ -487,10 +506,38 @@ export const beads_sync = tool({
   },
   async execute(args, ctx) {
     const autoPull = args.auto_pull ?? true;
+    const TIMEOUT_MS = 30000; // 30 seconds
+
+    /**
+     * Helper to run a command with timeout
+     */
+    const withTimeout = async <T>(
+      promise: Promise<T>,
+      timeoutMs: number,
+      operation: string,
+    ): Promise<T> => {
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new BeadError(
+                `Operation timed out after ${timeoutMs}ms`,
+                operation,
+              ),
+            ),
+          timeoutMs,
+        ),
+      );
+      return Promise.race([promise, timeoutPromise]);
+    };
 
     // 1. Pull if requested
     if (autoPull) {
-      const pullResult = await Bun.$`git pull --rebase`.quiet().nothrow();
+      const pullResult = await withTimeout(
+        Bun.$`git pull --rebase`.quiet().nothrow(),
+        TIMEOUT_MS,
+        "git pull --rebase",
+      );
       if (pullResult.exitCode !== 0) {
         throw new BeadError(
           `Failed to pull: ${pullResult.stderr.toString()}`,
@@ -501,7 +548,11 @@ export const beads_sync = tool({
     }
 
     // 2. Sync beads
-    const syncResult = await Bun.$`bd sync`.quiet().nothrow();
+    const syncResult = await withTimeout(
+      Bun.$`bd sync`.quiet().nothrow(),
+      TIMEOUT_MS,
+      "bd sync",
+    );
     if (syncResult.exitCode !== 0) {
       throw new BeadError(
         `Failed to sync beads: ${syncResult.stderr.toString()}`,
@@ -511,7 +562,11 @@ export const beads_sync = tool({
     }
 
     // 3. Push
-    const pushResult = await Bun.$`git push`.quiet().nothrow();
+    const pushResult = await withTimeout(
+      Bun.$`git push`.quiet().nothrow(),
+      TIMEOUT_MS,
+      "git push",
+    );
     if (pushResult.exitCode !== 0) {
       throw new BeadError(
         `Failed to push: ${pushResult.stderr.toString()}`,
