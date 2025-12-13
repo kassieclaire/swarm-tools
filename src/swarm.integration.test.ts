@@ -1315,24 +1315,29 @@ describe("Swarm Prompt V2 (with Agent Mail/Beads)", () => {
   describe("SUBTASK_PROMPT_V2", () => {
     it("contains expected sections", () => {
       // Check all main sections are present in the template
-      expect(SUBTASK_PROMPT_V2).toContain("## Task");
+      expect(SUBTASK_PROMPT_V2).toContain("[TASK]");
       expect(SUBTASK_PROMPT_V2).toContain("{subtask_title}");
       expect(SUBTASK_PROMPT_V2).toContain("{subtask_description}");
 
-      expect(SUBTASK_PROMPT_V2).toContain("## Files");
+      expect(SUBTASK_PROMPT_V2).toContain("[FILES]");
       expect(SUBTASK_PROMPT_V2).toContain("{file_list}");
 
-      expect(SUBTASK_PROMPT_V2).toContain("## Context");
+      expect(SUBTASK_PROMPT_V2).toContain("[CONTEXT]");
       expect(SUBTASK_PROMPT_V2).toContain("{shared_context}");
 
-      expect(SUBTASK_PROMPT_V2).toContain("## Workflow");
+      expect(SUBTASK_PROMPT_V2).toContain("[WORKFLOW]");
     });
 
-    it("DOES contain Agent Mail instructions", () => {
-      // V2 prompt tells agents to USE Agent Mail
-      expect(SUBTASK_PROMPT_V2).toContain("Agent Mail");
-      expect(SUBTASK_PROMPT_V2).toContain("agentmail_send");
+    it("DOES contain Swarm Mail instructions (MANDATORY)", () => {
+      // V2 prompt tells agents to USE Swarm Mail - this is non-negotiable
+      expect(SUBTASK_PROMPT_V2).toContain("SWARM MAIL");
+      expect(SUBTASK_PROMPT_V2).toContain("swarmmail_init");
+      expect(SUBTASK_PROMPT_V2).toContain("swarmmail_send");
+      expect(SUBTASK_PROMPT_V2).toContain("swarmmail_inbox");
+      expect(SUBTASK_PROMPT_V2).toContain("swarmmail_reserve");
+      expect(SUBTASK_PROMPT_V2).toContain("swarmmail_release");
       expect(SUBTASK_PROMPT_V2).toContain("thread_id");
+      expect(SUBTASK_PROMPT_V2).toContain("non-negotiable");
     });
 
     it("DOES contain beads instructions", () => {
@@ -1344,10 +1349,11 @@ describe("Swarm Prompt V2 (with Agent Mail/Beads)", () => {
       expect(SUBTASK_PROMPT_V2).toContain("swarm_complete");
     });
 
-    it("instructs agents to communicate", () => {
+    it("instructs agents to communicate via swarmmail", () => {
       expect(SUBTASK_PROMPT_V2).toContain("Never work silently");
-      expect(SUBTASK_PROMPT_V2).toContain("Report progress");
+      expect(SUBTASK_PROMPT_V2).toContain("progress");
       expect(SUBTASK_PROMPT_V2).toContain("coordinator");
+      expect(SUBTASK_PROMPT_V2).toContain("CRITICAL");
     });
   });
 });

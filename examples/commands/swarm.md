@@ -15,19 +15,31 @@ $ARGUMENTS
 
 **Default: Feature branch + PR with context sync.**
 
+## MANDATORY: Swarm Mail
+
+**ALL coordination MUST use `swarmmail_*` tools.** This is non-negotiable.
+
+Swarm Mail is embedded (no external server needed) and provides:
+
+- File reservations to prevent conflicts
+- Message passing between agents
+- Thread-based coordination tied to beads
+
 ## Workflow
 
-### 1. Initialize
+### 1. Initialize Swarm Mail (FIRST)
 
+```bash
+swarmmail_init(project_path="$PWD", task_description="Swarm: <task summary>")
 ```
-agentmail_init(project_path="$PWD", task_description="Swarm: <task summary>")
-```
+
+This registers you as the coordinator agent.
 
 ### 2. Knowledge Gathering (MANDATORY)
 
 **Before decomposing, query ALL knowledge sources:**
 
-```
+```bash
 # Past learnings from this project
 semantic-memory_find(query="<task keywords>", limit=5)
 
@@ -43,7 +55,7 @@ skills_list()
 
 **Load coordinator skills based on task type:**
 
-```
+```bash
 # For swarm coordination (ALWAYS load this)
 skills_use(name="swarm-coordination")
 
@@ -75,20 +87,20 @@ git push -u origin HEAD
 
 Use strategy selection and planning:
 
-```
+```bash
 swarm_select_strategy(task="<the task>")
 swarm_plan_prompt(task="<the task>", strategy="<auto or selected>", context="<synthesized knowledge>")
 ```
 
 Follow the prompt to create a BeadTree, then validate:
 
-```
+```bash
 swarm_validate_decomposition(response="<your BeadTree JSON>")
 ```
 
 ### 5. Create Beads
 
-```
+```bash
 beads_create_epic(epic_title="<task>", subtasks=[{title, files, priority}...])
 ```
 
@@ -99,13 +111,13 @@ Rules:
 - 3-7 beads per swarm
 - No file overlap between subtasks
 
-### 6. Reserve Files
+### 6. Reserve Files (via Swarm Mail)
 
-```
-agentmail_reserve(paths=[<files>], reason="<bead-id>: <description>")
+```bash
+swarmmail_reserve(paths=[<files>], reason="<bead-id>: <description>", ttl_seconds=3600)
 ```
 
-No two agents should edit the same file.
+No two agents should edit the same file. Reservations prevent conflicts.
 
 ### 7. Spawn Agents
 
@@ -113,7 +125,7 @@ No two agents should edit the same file.
 
 For each subtask:
 
-```
+```bash
 swarm_spawn_subtask(
   bead_id="<id>",
   epic_id="<epic>",
@@ -140,15 +152,16 @@ See full skill list with skills_list().
 
 Then spawn:
 
-```
+```bash
 Task(subagent_type="swarm/worker", description="<bead-title>", prompt="<from swarm_spawn_subtask>")
 ```
 
 ### 8. Monitor (unless --no-sync)
 
-```
+```bash
 swarm_status(epic_id="<epic-id>", project_key="$PWD")
-agentmail_inbox()
+swarmmail_inbox()  # Check for worker messages
+swarmmail_read_message(message_id=N)  # Read specific message
 ```
 
 **Intervention triggers:**
@@ -160,14 +173,15 @@ agentmail_inbox()
 
 If incompatibilities spotted, broadcast:
 
-```
-agentmail_send(to=["*"], subject="Coordinator Update", body="<guidance>", importance="high")
+```bash
+swarmmail_send(to=["*"], subject="Coordinator Update", body="<guidance>", importance="high", thread_id="<epic-id>")
 ```
 
 ### 9. Complete
 
-```
+```bash
 swarm_complete(project_key="$PWD", agent_name="<your-name>", bead_id="<epic-id>", summary="<done>", files_touched=[...])
+swarmmail_release()  # Release any remaining reservations
 beads_sync()
 ```
 
@@ -176,6 +190,19 @@ beads_sync()
 ```bash
 gh pr create --title "feat: <epic title>" --body "## Summary\n<bullets>\n\n## Beads\n<list>"
 ```
+
+## Swarm Mail Quick Reference
+
+| Tool                     | Purpose                             |
+| ------------------------ | ----------------------------------- |
+| `swarmmail_init`         | Initialize session (REQUIRED FIRST) |
+| `swarmmail_send`         | Send message to agents              |
+| `swarmmail_inbox`        | Check inbox (max 5, no bodies)      |
+| `swarmmail_read_message` | Read specific message body          |
+| `swarmmail_reserve`      | Reserve files for exclusive editing |
+| `swarmmail_release`      | Release file reservations           |
+| `swarmmail_ack`          | Acknowledge message                 |
+| `swarmmail_health`       | Check database health               |
 
 ## Strategy Reference
 
@@ -201,13 +228,14 @@ gh pr create --title "feat: <epic title>" --body "## Summary\n<bullets>\n\n## Be
 
 ## Quick Checklist
 
+- [ ] **swarmmail_init** called FIRST
 - [ ] Knowledge gathered (semantic-memory, CASS, pdf-brain, skills)
 - [ ] Strategy selected
 - [ ] BeadTree validated (no file conflicts)
 - [ ] Epic + subtasks created
-- [ ] Files reserved
+- [ ] Files reserved via **swarmmail_reserve**
 - [ ] Workers spawned in parallel
-- [ ] Progress monitored
+- [ ] Progress monitored via **swarmmail_inbox**
 - [ ] PR created (or pushed to main)
 
-Begin with knowledge gathering now.
+Begin with swarmmail_init and knowledge gathering now.

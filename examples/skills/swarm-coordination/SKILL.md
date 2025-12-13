@@ -8,8 +8,12 @@ tags:
 tools:
   - swarm_decompose
   - swarm_complete
-  - agentmail_init
-  - agentmail_send
+  - swarmmail_init
+  - swarmmail_send
+  - swarmmail_inbox
+  - swarmmail_read_message
+  - swarmmail_reserve
+  - swarmmail_release
   - skills_use
   - skills_list
 related_skills:
@@ -23,6 +27,16 @@ related_skills:
 This skill provides guidance for effective multi-agent coordination in OpenCode swarm workflows.
 
 **IMPORTANT:** This skill references global skills in `global-skills/`. Workers should load domain-specific skills based on their subtask type.
+
+## MANDATORY: Swarm Mail
+
+**ALL coordination MUST use `swarmmail_*` tools.** This is non-negotiable.
+
+Swarm Mail is embedded (no external server needed) and provides:
+
+- File reservations to prevent conflicts
+- Message passing between agents
+- Thread-based coordination tied to beads
 
 ## When to Use Swarm Coordination
 
@@ -54,7 +68,7 @@ Before decomposing, understand:
 
 **Parallel Strategy** - For independent subtasks:
 
-```
+```text
 Parent Task: "Add user authentication"
 ├── Subtask 1: "Create auth API endpoints" (backend)
 ├── Subtask 2: "Build login/signup forms" (frontend)
@@ -64,7 +78,7 @@ Parent Task: "Add user authentication"
 
 **Sequential Strategy** - When order matters:
 
-```
+```text
 Parent Task: "Migrate database schema"
 ├── Step 1: "Create migration files"
 ├── Step 2: "Update model definitions"
@@ -74,7 +88,7 @@ Parent Task: "Migrate database schema"
 
 **Hybrid Strategy** - Mixed dependencies:
 
-```
+```text
 Parent Task: "Add feature X"
 ├── Phase 1 (parallel):
 │   ├── Subtask A: "Design API"
@@ -90,40 +104,87 @@ Parent Task: "Add feature X"
 
 When multiple agents work on the same codebase:
 
-1. **Reserve files before editing** - Use `agentmail_reserve` to claim files
-2. **Respect reservations** - Don't edit files reserved by other agents
-3. **Release when done** - Files auto-release on task completion
-4. **Coordinate on shared files** - If you must edit a reserved file, send a message to the owning agent
+1. **Initialize Swarm Mail first** - Use `swarmmail_init` before any work
+2. **Reserve files before editing** - Use `swarmmail_reserve` to claim files
+3. **Respect reservations** - Don't edit files reserved by other agents
+4. **Release when done** - Use `swarmmail_release` or let `swarm_complete` handle it
+5. **Coordinate on shared files** - If you must edit a reserved file, send a message to the owning agent
+
+```typescript
+// Initialize first
+await swarmmail_init({
+  project_path: "$PWD",
+  task_description: "Working on auth feature",
+});
+
+// Reserve files
+await swarmmail_reserve({
+  paths: ["src/auth/**"],
+  reason: "bd-123: Auth implementation",
+  ttl_seconds: 3600,
+});
+
+// Work...
+
+// Release when done
+await swarmmail_release();
+```
 
 ## Communication Patterns
 
 ### Broadcasting Updates
 
-```
-agentmail_send(recipients: ["all"], message: "Completed API endpoints, ready for frontend integration")
+```typescript
+swarmmail_send({
+  to: ["*"],
+  subject: "API Complete",
+  body: "Completed API endpoints, ready for frontend integration",
+  thread_id: epic_id,
+});
 ```
 
 ### Direct Coordination
 
-```
-agentmail_send(recipients: ["frontend-agent"], message: "Auth API is at /api/auth/*, here's the spec...")
+```typescript
+swarmmail_send({
+  to: ["frontend-agent"],
+  subject: "Auth API Spec",
+  body: "Auth API is at /api/auth/*, here's the spec...",
+  thread_id: epic_id,
+});
 ```
 
-### Blocking on Dependencies
+### Checking for Messages
 
+```typescript
+// Check inbox (max 5, no bodies for context safety)
+const inbox = await swarmmail_inbox();
+
+// Read specific message body
+const message = await swarmmail_read_message({ message_id: N });
 ```
-# Wait for a dependency before proceeding
-agentmail_receive(wait: true, filter: "api-complete")
+
+### Reporting Blockers
+
+```typescript
+swarmmail_send({
+  to: ["coordinator"],
+  subject: "BLOCKED: Need DB schema",
+  body: "Can't proceed without users table",
+  thread_id: epic_id,
+  importance: "urgent",
+});
 ```
 
 ## Best Practices
 
-1. **Small, focused subtasks** - Each subtask should be completable in one agent session
-2. **Clear boundaries** - Define exactly what files/modules each subtask touches
-3. **Explicit handoffs** - When one task enables another, communicate clearly
-4. **Graceful failures** - If a subtask fail, don't block the whole swarm
-5. **Progress updates** - Use beads to track subtask status
-6. **Load relevant skills** - Workers should call `skills_use()` based on their task type:
+1. **Initialize Swarm Mail first** - Always call `swarmmail_init` before any work
+2. **Small, focused subtasks** - Each subtask should be completable in one agent session
+3. **Clear boundaries** - Define exactly what files/modules each subtask touches
+4. **Explicit handoffs** - When one task enables another, communicate clearly
+5. **Graceful failures** - If a subtask fails, don't block the whole swarm
+6. **Progress updates** - Use beads to track subtask status
+7. **Load relevant skills** - Workers should call `skills_use()` based on their task type:
    - Testing work → `skills_use(name="testing-patterns")`
    - Architecture decisions → `skills_use(name="system-design")`
    - CLI development → `skills_use(name="cli-builder")`
@@ -136,7 +197,7 @@ agentmail_receive(wait: true, filter: "api-complete")
 ```yaml
 decomposition:
   strategy: hybrid
-  skills: [system-design, swarm-coordination] # Load before decomposing
+  skills: [system-design, swarm-coordination]
   phases:
     - name: design
       parallel: true
@@ -157,7 +218,7 @@ decomposition:
 ```yaml
 decomposition:
   strategy: sequential
-  skills: [testing-patterns] # Load before decomposing
+  skills: [testing-patterns]
   subtasks:
     - reproduce-bug
     - identify-root-cause
@@ -171,7 +232,7 @@ decomposition:
 ```yaml
 decomposition:
   strategy: parallel
-  skills: [testing-patterns, system-design] # Load before decomposing
+  skills: [testing-patterns, system-design]
   subtasks:
     - refactor-module-a
     - refactor-module-b
@@ -184,17 +245,20 @@ decomposition:
 
 **For Coordinators:**
 
-1. Load `swarm-coordination` skill first
-2. Analyze task type
-3. Load additional skills based on domain (testing, design, CLI)
-4. Include skill recommendations in `shared_context` for workers
+1. Initialize Swarm Mail with `swarmmail_init`
+2. Load `swarm-coordination` skill
+3. Analyze task type
+4. Load additional skills based on domain (testing, design, CLI)
+5. Include skill recommendations in `shared_context` for workers
 
 **For Workers:**
 
-1. Read `shared_context` from coordinator
-2. Load recommended skills with `skills_use(name="skill-name")`
-3. Apply skill knowledge to subtask
-4. Report completion
+1. Initialize Swarm Mail with `swarmmail_init`
+2. Read `shared_context` from coordinator
+3. Load recommended skills with `skills_use(name="skill-name")`
+4. Apply skill knowledge to subtask
+5. Report progress via `swarmmail_send`
+6. Complete with `swarm_complete`
 
 **Example shared_context:**
 
@@ -214,26 +278,15 @@ Project learnings: [semantic-memory results]
 [Domain knowledge from coordinator]
 ```
 
-### Bug Fix Swarm
+## Swarm Mail Quick Reference
 
-```yaml
-decomposition:
-  strategy: sequential
-  subtasks:
-    - reproduce-bug
-    - identify-root-cause
-    - implement-fix
-    - add-regression-test
-```
-
-### Refactoring
-
-```yaml
-decomposition:
-  strategy: parallel
-  subtasks:
-    - refactor-module-a
-    - refactor-module-b
-    - update-imports
-    - run-full-test-suite
-```
+| Tool                     | Purpose                             |
+| ------------------------ | ----------------------------------- |
+| `swarmmail_init`         | Initialize session (REQUIRED FIRST) |
+| `swarmmail_send`         | Send message to agents              |
+| `swarmmail_inbox`        | Check inbox (max 5, no bodies)      |
+| `swarmmail_read_message` | Read specific message body          |
+| `swarmmail_reserve`      | Reserve files for exclusive editing |
+| `swarmmail_release`      | Release file reservations           |
+| `swarmmail_ack`          | Acknowledge message                 |
+| `swarmmail_health`       | Check database health               |

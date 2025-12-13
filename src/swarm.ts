@@ -709,21 +709,64 @@ Only modify these files. Need others? Message the coordinator.
 
 {error_context}
 
-## [TOOLS]
-### Beads
-- beads_update (status: blocked)
-- beads_create (new bugs)
-- beads_close (via swarm_complete)
+## [MANDATORY: SWARM MAIL]
 
-### Agent Mail
-- agentmail_send (thread_id: {epic_id})
+**YOU MUST USE SWARM MAIL FOR ALL COORDINATION.** This is non-negotiable.
+
+### Initialize FIRST (before any work)
+\`\`\`
+swarmmail_init(project_path="$PWD", task_description="{subtask_title}")
+\`\`\`
+
+### Reserve Files (if not already reserved by coordinator)
+\`\`\`
+swarmmail_reserve(paths=[...files...], reason="{bead_id}: {subtask_title}")
+\`\`\`
+
+### Check Inbox Regularly
+\`\`\`
+swarmmail_inbox()  # Check for coordinator messages
+swarmmail_read_message(message_id=N)  # Read specific message
+\`\`\`
+
+### Report Progress (REQUIRED - don't work silently)
+\`\`\`
+swarmmail_send(
+  to=["coordinator"],
+  subject="Progress: {bead_id}",
+  body="<what you did, blockers, questions>",
+  thread_id="{epic_id}"
+)
+\`\`\`
+
+### When Blocked
+\`\`\`
+swarmmail_send(
+  to=["coordinator"],
+  subject="BLOCKED: {bead_id}",
+  body="<blocker description, what you need>",
+  importance="high",
+  thread_id="{epic_id}"
+)
+beads_update(id="{bead_id}", status="blocked")
+\`\`\`
+
+### Release Files When Done
+\`\`\`
+swarmmail_release()  # Or let swarm_complete handle it
+\`\`\`
+
+## [OTHER TOOLS]
+### Beads
+- beads_update(id, status) - Mark blocked if stuck
+- beads_create(title, type) - Log new bugs found
 
 ### Skills (if available)
-- skills_list (discover available skills)
-- skills_use (activate a skill for specialized guidance)
+- skills_list() - Discover available skills
+- skills_use(name) - Activate skill for specialized guidance
 
-### Completion
-- swarm_complete (REQUIRED when done)
+### Completion (REQUIRED)
+- swarm_complete(project_key, agent_name, bead_id, summary, files_touched)
 
 ## [LEARNING]
 As you work, note reusable patterns, best practices, or domain insights:
@@ -732,15 +775,15 @@ As you work, note reusable patterns, best practices, or domain insights:
 - Good skills have clear "when to use" descriptions with actionable instructions
 - Skills make swarms smarter over time
 
-## [OUTPUT]
-1. Read files first
-2. Implement changes
-3. Verify (typecheck)
-4. Complete with swarm_complete
+## [WORKFLOW]
+1. **swarmmail_init** - Initialize session FIRST
+2. Read assigned files
+3. Implement changes
+4. **swarmmail_send** - Report progress to coordinator
+5. Verify (typecheck)
+6. **swarm_complete** - Mark done, release reservations
 
-Return: Summary of changes made. Note any patterns worth preserving as skills.
-
-**Never work silently.** Communicate progress and blockers immediately.
+**CRITICAL: Never work silently. Send progress updates via swarmmail_send every significant milestone.**
 
 Begin now.`;
 

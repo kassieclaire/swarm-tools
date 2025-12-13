@@ -15,11 +15,13 @@ tools:
   - swarm_progress
   - beads_create_epic
   - beads_query
-  - agentmail_init
-  - agentmail_send
-  - agentmail_inbox
-  - agentmail_reserve
-  - agentmail_release
+  - swarmmail_init
+  - swarmmail_send
+  - swarmmail_inbox
+  - swarmmail_read_message
+  - swarmmail_reserve
+  - swarmmail_release
+  - swarmmail_health
   - semantic-memory_find
   - cass_search
   - pdf-brain_search
@@ -32,6 +34,16 @@ references:
 # Swarm Coordination
 
 Multi-agent orchestration for parallel task execution. The coordinator breaks work into subtasks, spawns worker agents, monitors progress, and aggregates results.
+
+## MANDATORY: Swarm Mail
+
+**ALL coordination MUST use `swarmmail_*` tools.** This is non-negotiable.
+
+Swarm Mail is embedded (no external server needed) and provides:
+
+- File reservations to prevent conflicts
+- Message passing between agents
+- Thread-based coordination tied to beads
 
 ## When to Swarm
 
@@ -53,19 +65,29 @@ Multi-agent orchestration for parallel task execution. The coordinator breaks wo
 
 ## Coordinator Workflow
 
-### Phase 1: Knowledge Gathering (MANDATORY)
+### Phase 1: Initialize Swarm Mail (FIRST)
+
+```typescript
+// ALWAYS initialize first - registers you as coordinator
+await swarmmail_init({
+  project_path: "$PWD",
+  task_description: "Swarm: <task summary>",
+});
+```
+
+### Phase 2: Knowledge Gathering (MANDATORY)
 
 Before decomposing, query ALL knowledge sources:
 
 ```typescript
 // 1. Past learnings from this project
-semantic - memory_find({ query: "<task keywords>", limit: 5 });
+semantic_memory_find({ query: "<task keywords>", limit: 5 });
 
 // 2. How similar tasks were solved before
 cass_search({ query: "<task description>", limit: 5 });
 
 // 3. Design patterns and prior art
-pdf - brain_search({ query: "<domain concepts>", limit: 5 });
+pdf_brain_search({ query: "<domain concepts>", limit: 5 });
 
 // 4. Available skills to inject into workers
 skills_list();
@@ -73,7 +95,7 @@ skills_list();
 
 Synthesize findings into `shared_context` for workers.
 
-### Phase 2: Decomposition
+### Phase 3: Decomposition
 
 ```typescript
 // Auto-select strategy and generate decomposition prompt
@@ -97,7 +119,25 @@ await beads_create_epic({
 });
 ```
 
-### Phase 3: Spawn Workers
+### Phase 4: Reserve Files (via Swarm Mail)
+
+```typescript
+// Reserve files for each subtask BEFORE spawning workers
+await swarmmail_reserve({
+  paths: ["src/auth/**"],
+  reason: "bd-123: Auth service implementation",
+  ttl_seconds: 3600,
+  exclusive: true,
+});
+```
+
+**Rules:**
+
+- No file overlap between subtasks
+- Coordinator mediates conflicts
+- `swarm_complete` auto-releases
+
+### Phase 5: Spawn Workers
 
 ```typescript
 for (const subtask of subtasks) {
@@ -118,24 +158,40 @@ for (const subtask of subtasks) {
 }
 ```
 
-### Phase 4: Monitor & Intervene
+### Phase 6: Monitor & Intervene
 
 ```typescript
 // Check progress
 const status = await swarm_status({ epic_id, project_key });
 
-// Check for messages
-const inbox = await agentmail_inbox({ limit: 5 });
+// Check for messages from workers
+const inbox = await swarmmail_inbox({ limit: 5 });
+
+// Read specific message if needed
+const message = await swarmmail_read_message({ message_id: N });
 
 // Intervene if needed (see Intervention Patterns)
 ```
 
-### Phase 5: Aggregate & Complete
+### Phase 7: Aggregate & Complete
 
 - Verify all subtasks completed
 - Run final verification (typecheck, tests)
 - Close epic with summary
+- Release any remaining reservations
 - Record outcomes for learning
+
+```typescript
+await swarm_complete({
+  project_key: "$PWD",
+  agent_name: "coordinator",
+  bead_id: epic_id,
+  summary: "All subtasks complete",
+  files_touched: [...],
+});
+await swarmmail_release(); // Release any remaining reservations
+await beads_sync();
+```
 
 ## Decomposition Strategies
 
@@ -150,37 +206,13 @@ Four strategies, auto-selected by task keywords:
 
 See `references/strategies.md` for full details.
 
-## File Reservation Protocol
-
-Workers MUST reserve files before editing:
-
-```typescript
-// Reserve (exclusive by default)
-await agentmail_reserve({
-  paths: ["src/auth/**"],
-  reason: "bd-123: Auth service implementation",
-  ttl_seconds: 3600,
-});
-
-// Work...
-
-// Release (or let swarm_complete handle it)
-await agentmail_release({ paths: ["src/auth/**"] });
-```
-
-**Rules:**
-
-- No file overlap between subtasks
-- Coordinator mediates conflicts
-- `swarm_complete` auto-releases
-
 ## Communication Protocol
 
-Workers communicate via Agent Mail with epic ID as thread:
+Workers communicate via Swarm Mail with epic ID as thread:
 
 ```typescript
 // Progress update
-agentmail_send({
+swarmmail_send({
   to: ["coordinator"],
   subject: "Auth API complete",
   body: "Endpoints ready at /api/auth/*",
@@ -188,7 +220,7 @@ agentmail_send({
 });
 
 // Blocker
-agentmail_send({
+swarmmail_send({
   to: ["coordinator"],
   subject: "BLOCKED: Need DB schema",
   body: "Can't proceed without users table",
@@ -265,25 +297,51 @@ One blocker affects multiple subtasks.
 - Thread: {epic_id}
 ```
 
-## Quick Reference
+## Swarm Mail Quick Reference
+
+| Tool                     | Purpose                             |
+| ------------------------ | ----------------------------------- |
+| `swarmmail_init`         | Initialize session (REQUIRED FIRST) |
+| `swarmmail_send`         | Send message to agents              |
+| `swarmmail_inbox`        | Check inbox (max 5, no bodies)      |
+| `swarmmail_read_message` | Read specific message body          |
+| `swarmmail_reserve`      | Reserve files for exclusive editing |
+| `swarmmail_release`      | Release file reservations           |
+| `swarmmail_ack`          | Acknowledge message                 |
+| `swarmmail_health`       | Check database health               |
+
+## Full Swarm Flow
 
 ```typescript
-// Full swarm flow
-semantic - memory_find({ query }); // 1. Check learnings
-cass_search({ query }); // 2. Check history
-pdf - brain_search({ query }); // 3. Check patterns
-skills_list(); // 4. Check skills
+// 1. Initialize Swarm Mail FIRST
+swarmmail_init({ project_path: "$PWD", task_description: "..." });
 
-swarm_plan_prompt({ task }); // 5. Generate decomposition
-swarm_validate_decomposition(); // 6. Validate
-beads_create_epic(); // 7. Create beads
+// 2. Gather knowledge
+semantic_memory_find({ query });
+cass_search({ query });
+pdf_brain_search({ query });
+skills_list();
 
-swarm_spawn_subtask(); // 8. Spawn workers (loop)
-swarm_status(); // 9. Monitor
-agentmail_inbox(); // 10. Check messages
+// 3. Decompose
+swarm_plan_prompt({ task });
+swarm_validate_decomposition();
+beads_create_epic();
 
-// Workers complete with:
-swarm_complete(); // Auto: close bead, release files, notify
+// 4. Reserve files
+swarmmail_reserve({ paths, reason, ttl_seconds });
+
+// 5. Spawn workers (loop)
+swarm_spawn_subtask();
+
+// 6. Monitor
+swarm_status();
+swarmmail_inbox();
+swarmmail_read_message({ message_id });
+
+// 7. Complete
+swarm_complete();
+swarmmail_release();
+beads_sync();
 ```
 
 See `references/coordinator-patterns.md` for detailed patterns.
