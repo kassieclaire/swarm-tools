@@ -384,6 +384,113 @@ const agentmail_health = tool({
 });
 
 // =============================================================================
+// Swarm Mail Tools (Embedded - Primary)
+// =============================================================================
+
+const swarmmail_init = tool({
+  description: "Initialize Swarm Mail session (REQUIRED FIRST)",
+  args: {
+    project_path: tool.schema.string().describe("Absolute path to the project"),
+    agent_name: tool.schema.string().optional().describe("Custom agent name"),
+    task_description: tool.schema
+      .string()
+      .optional()
+      .describe("Task description"),
+  },
+  execute: (args, ctx) => execTool("swarmmail_init", args, ctx),
+});
+
+const swarmmail_send = tool({
+  description: "Send message to other agents via Swarm Mail",
+  args: {
+    to: tool.schema
+      .array(tool.schema.string())
+      .describe("Recipient agent names"),
+    subject: tool.schema.string().describe("Message subject"),
+    body: tool.schema.string().describe("Message body"),
+    thread_id: tool.schema
+      .string()
+      .optional()
+      .describe("Thread ID for grouping"),
+    importance: tool.schema
+      .enum(["low", "normal", "high", "urgent"])
+      .optional()
+      .describe("Message importance"),
+    ack_required: tool.schema
+      .boolean()
+      .optional()
+      .describe("Require acknowledgment"),
+  },
+  execute: (args, ctx) => execTool("swarmmail_send", args, ctx),
+});
+
+const swarmmail_inbox = tool({
+  description: "Fetch inbox (CONTEXT-SAFE: bodies excluded, max 5 messages)",
+  args: {
+    limit: tool.schema
+      .number()
+      .max(5)
+      .optional()
+      .describe("Max messages (max 5)"),
+    urgent_only: tool.schema
+      .boolean()
+      .optional()
+      .describe("Only urgent messages"),
+  },
+  execute: (args, ctx) => execTool("swarmmail_inbox", args, ctx),
+});
+
+const swarmmail_read_message = tool({
+  description: "Fetch ONE message body by ID",
+  args: {
+    message_id: tool.schema.number().describe("Message ID"),
+  },
+  execute: (args, ctx) => execTool("swarmmail_read_message", args, ctx),
+});
+
+const swarmmail_reserve = tool({
+  description: "Reserve file paths for exclusive editing",
+  args: {
+    paths: tool.schema
+      .array(tool.schema.string())
+      .describe("File paths/patterns"),
+    ttl_seconds: tool.schema.number().optional().describe("Reservation TTL"),
+    exclusive: tool.schema.boolean().optional().describe("Exclusive lock"),
+    reason: tool.schema.string().optional().describe("Reservation reason"),
+  },
+  execute: (args, ctx) => execTool("swarmmail_reserve", args, ctx),
+});
+
+const swarmmail_release = tool({
+  description: "Release file reservations",
+  args: {
+    paths: tool.schema
+      .array(tool.schema.string())
+      .optional()
+      .describe("Paths to release"),
+    reservation_ids: tool.schema
+      .array(tool.schema.number())
+      .optional()
+      .describe("Reservation IDs"),
+  },
+  execute: (args, ctx) => execTool("swarmmail_release", args, ctx),
+});
+
+const swarmmail_ack = tool({
+  description: "Acknowledge a message",
+  args: {
+    message_id: tool.schema.number().describe("Message ID"),
+  },
+  execute: (args, ctx) => execTool("swarmmail_ack", args, ctx),
+});
+
+const swarmmail_health = tool({
+  description: "Check Swarm Mail database health",
+  args: {},
+  execute: (args, ctx) => execTool("swarmmail_health", args, ctx),
+});
+
+// =============================================================================
 // Structured Tools
 // =============================================================================
 
@@ -794,7 +901,7 @@ export const SwarmPlugin: Plugin = async (
       beads_ready,
       beads_sync,
       beads_link_thread,
-      // Agent Mail
+      // Agent Mail (Legacy MCP)
       agentmail_init,
       agentmail_send,
       agentmail_inbox,
@@ -805,6 +912,15 @@ export const SwarmPlugin: Plugin = async (
       agentmail_ack,
       agentmail_search,
       agentmail_health,
+      // Swarm Mail (Embedded - Primary)
+      swarmmail_init,
+      swarmmail_send,
+      swarmmail_inbox,
+      swarmmail_read_message,
+      swarmmail_reserve,
+      swarmmail_release,
+      swarmmail_ack,
+      swarmmail_health,
       // Structured
       structured_extract_json,
       structured_validate,
