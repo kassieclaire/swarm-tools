@@ -37,10 +37,12 @@
     "@opencode-ai/plugin": "^1.0.134",
     "gray-matter": "^4.0.3",
     "ioredis": "^5.4.1",
+    "minimatch": "^10.1.1",
     "zod": "4.1.8"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/minimatch": "^6.0.0",
     "typescript": "^5.7.0",
     "vitest": "^4.0.15"
   },
