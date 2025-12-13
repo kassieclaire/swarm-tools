@@ -52,8 +52,13 @@ const instances = new Map<string, PGlite>();
 /** Whether schema has been initialized for each instance */
 const schemaInitialized = new Map<string, boolean>();
 
+/** Track degraded instances (path -> error) */
+const degradedInstances = new Map<string, Error>();
+
 /**
  * Get or create a PGLite instance for the given path
+ *
+ * If initialization fails, falls back to in-memory database and marks instance as degraded.
  */
 export async function getDatabase(projectPath?: string): Promise<PGlite> {
   const dbPath = getDatabasePath(projectPath);
@@ -64,14 +69,46 @@ export async function getDatabase(projectPath?: string): Promise<PGlite> {
     return db;
   }
 
-  // Create new instance
-  db = new PGlite(dbPath);
-  instances.set(dbPath, db);
+  // Try to create new instance
+  try {
+    db = new PGlite(dbPath);
+    instances.set(dbPath, db);
 
-  // Initialize schema if needed
-  if (!schemaInitialized.get(dbPath)) {
-    await initializeSchema(db);
-    schemaInitialized.set(dbPath, true);
+    // Initialize schema if needed
+    if (!schemaInitialized.get(dbPath)) {
+      await initializeSchema(db);
+      schemaInitialized.set(dbPath, true);
+    }
+  } catch (error) {
+    const err = error as Error;
+    console.error(
+      `[swarm-mail] Failed to initialize database at ${dbPath}:`,
+      err.message,
+    );
+    degradedInstances.set(dbPath, err);
+
+    // Fall back to in-memory database
+    console.warn(
+      `[swarm-mail] Falling back to in-memory database (data will not persist)`,
+    );
+
+    try {
+      db = new PGlite(); // in-memory mode
+      instances.set(dbPath, db);
+
+      // Initialize schema for in-memory instance
+      await initializeSchema(db);
+      schemaInitialized.set(dbPath, true);
+    } catch (fallbackError) {
+      const fallbackErr = fallbackError as Error;
+      console.error(
+        `[swarm-mail] CRITICAL: In-memory fallback failed:`,
+        fallbackErr.message,
+      );
+      throw new Error(
+        `Database initialization failed: ${err.message}. Fallback also failed: ${fallbackErr.message}`,
+      );
+    }
   }
 
   return db;
@@ -87,6 +124,7 @@ export async function closeDatabase(projectPath?: string): Promise<void> {
     await db.close();
     instances.delete(dbPath);
     schemaInitialized.delete(dbPath);
+    degradedInstances.delete(dbPath);
   }
 }
 
@@ -99,6 +137,7 @@ export async function closeAllDatabases(): Promise<void> {
     instances.delete(path);
     schemaInitialized.delete(path);
   }
+  degradedInstances.clear();
 }
 
 /**
@@ -216,10 +255,22 @@ async function initializeSchema(db: PGlite): Promise<void> {
 
 /**
  * Check if the database is healthy
+ *
+ * Returns false if database is in degraded mode (using in-memory fallback)
  */
 export async function isDatabaseHealthy(
   projectPath?: string,
 ): Promise<boolean> {
+  const dbPath = getDatabasePath(projectPath);
+
+  // Check if instance is degraded
+  if (degradedInstances.has(dbPath)) {
+    console.warn(
+      `[swarm-mail] Database is in degraded mode (using in-memory fallback)`,
+    );
+    return false;
+  }
+
   try {
     const db = await getDatabase(projectPath);
     const result = await db.query("SELECT 1 as ok");

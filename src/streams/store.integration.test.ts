@@ -371,4 +371,178 @@ describe("Event Store", () => {
       expect(stats.reservations).toBe(1);
     });
   });
+
+  describe("SQL Injection Protection", () => {
+    it("should handle malicious projectKey in replayEvents with clearViews", async () => {
+      // Create a legitimate project first
+      await registerAgent("legit-project", "Agent1", {}, TEST_PROJECT_PATH);
+      await sendMessage(
+        "legit-project",
+        "Agent1",
+        ["Agent1"],
+        "Test",
+        "Body",
+        {},
+        TEST_PROJECT_PATH,
+      );
+
+      // Attempt SQL injection via projectKey
+      const maliciousKey = "'; DROP TABLE events; --";
+
+      // Should not throw, should not drop tables
+      await replayEvents(
+        { projectKey: maliciousKey, clearViews: true },
+        TEST_PROJECT_PATH,
+      );
+
+      // Verify events table still exists and legit data is intact
+      const events = await readEvents({}, TEST_PROJECT_PATH);
+      expect(events).toBeDefined();
+      expect(events.length).toBeGreaterThan(0);
+
+      // Verify legit project data still exists
+      const legitEvents = await readEvents(
+        { projectKey: "legit-project" },
+        TEST_PROJECT_PATH,
+      );
+      expect(legitEvents.length).toBeGreaterThan(0);
+    });
+
+    it("should handle malicious projectKey with UNION injection attempt", async () => {
+      await registerAgent("safe-project", "Agent1", {}, TEST_PROJECT_PATH);
+
+      const unionInjection = "' UNION SELECT * FROM agents --";
+
+      // Should treat the entire string as a literal projectKey
+      await replayEvents(
+        { projectKey: unionInjection, clearViews: true },
+        TEST_PROJECT_PATH,
+      );
+
+      // Verify safe-project data still exists
+      const events = await readEvents(
+        { projectKey: "safe-project" },
+        TEST_PROJECT_PATH,
+      );
+      expect(events.length).toBeGreaterThan(0);
+    });
+
+    it("should handle malicious projectKey in readEvents", async () => {
+      await registerAgent("test-project", "Agent1", {}, TEST_PROJECT_PATH);
+
+      const maliciousKey = "test' OR '1'='1";
+
+      // Should return no results (no project with that exact key)
+      const events = await readEvents(
+        { projectKey: maliciousKey },
+        TEST_PROJECT_PATH,
+      );
+
+      // Should not return all events (which would happen if injection succeeded)
+      expect(events.length).toBe(0);
+    });
+
+    it("should handle malicious projectKey in getLatestSequence", async () => {
+      await registerAgent("real-project", "Agent1", {}, TEST_PROJECT_PATH);
+
+      const maliciousKey = "'; DELETE FROM events WHERE '1'='1";
+
+      const seq = await getLatestSequence(maliciousKey, TEST_PROJECT_PATH);
+
+      // Should return 0 (no events for this malicious key)
+      expect(seq).toBe(0);
+
+      // Verify events table still has data
+      const allEvents = await readEvents({}, TEST_PROJECT_PATH);
+      expect(allEvents.length).toBeGreaterThan(0);
+    });
+
+    it("should handle special SQL characters in projectKey", async () => {
+      const specialCharsKey = "project'; SELECT * FROM events; --";
+
+      await registerAgent(specialCharsKey, "Agent1", {}, TEST_PROJECT_PATH);
+
+      // Should be able to read back with the exact key
+      const events = await readEvents(
+        { projectKey: specialCharsKey },
+        TEST_PROJECT_PATH,
+      );
+
+      expect(events.length).toBe(1);
+      expect(events[0]?.project_key).toBe(specialCharsKey);
+    });
+
+    it("should handle malicious agent names", async () => {
+      const maliciousName = "Agent1'; DROP TABLE agents; --";
+
+      await registerAgent("test-project", maliciousName, {}, TEST_PROJECT_PATH);
+
+      // Verify agent was created with the literal name
+      const db = await getDatabase(TEST_PROJECT_PATH);
+      const agents = await db.query<{ name: string }>(
+        "SELECT name FROM agents WHERE project_key = $1",
+        ["test-project"],
+      );
+
+      expect(agents.rows.length).toBe(1);
+      expect(agents.rows[0]?.name).toBe(maliciousName);
+
+      // Verify tables still exist
+      const events = await readEvents({}, TEST_PROJECT_PATH);
+      expect(events).toBeDefined();
+    });
+
+    it("should handle malicious message subjects and bodies", async () => {
+      await registerAgent("test-project", "Agent1", {}, TEST_PROJECT_PATH);
+
+      const maliciousSubject = "'; DELETE FROM messages WHERE '1'='1; --";
+      const maliciousBody =
+        "Body with SQL: '); DROP TABLE message_recipients; --";
+
+      await sendMessage(
+        "test-project",
+        "Agent1",
+        ["Agent1"],
+        maliciousSubject,
+        maliciousBody,
+        {},
+        TEST_PROJECT_PATH,
+      );
+
+      // Verify message was stored with literal values
+      const db = await getDatabase(TEST_PROJECT_PATH);
+      const messages = await db.query<{ subject: string; body: string }>(
+        "SELECT subject, body FROM messages WHERE project_key = $1",
+        ["test-project"],
+      );
+
+      expect(messages.rows.length).toBe(1);
+      expect(messages.rows[0]?.subject).toBe(maliciousSubject);
+      expect(messages.rows[0]?.body).toBe(maliciousBody);
+    });
+
+    it("should handle malicious file paths in reservations", async () => {
+      await registerAgent("test-project", "Agent1", {}, TEST_PROJECT_PATH);
+
+      const maliciousPath = "src/**'; DELETE FROM reservations WHERE '1'='1";
+
+      await reserveFiles(
+        "test-project",
+        "Agent1",
+        [maliciousPath],
+        {},
+        TEST_PROJECT_PATH,
+      );
+
+      // Verify reservation was created with literal path
+      const db = await getDatabase(TEST_PROJECT_PATH);
+      const reservations = await db.query<{ path_pattern: string }>(
+        "SELECT path_pattern FROM reservations WHERE project_key = $1",
+        ["test-project"],
+      );
+
+      expect(reservations.rows.length).toBe(1);
+      expect(reservations.rows[0]?.path_pattern).toBe(maliciousPath);
+    });
+  });
 });

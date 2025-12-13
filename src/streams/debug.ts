@@ -1,5 +1,5 @@
 /**
- * Debug Tools - Event inspection and state debugging
+ * Swarm Mail Debug Tools - Event inspection and state debugging
  *
  * Tools for inspecting the event store, agent state, and system health.
  * Useful for debugging issues and understanding system behavior.

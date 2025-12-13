@@ -36,11 +36,11 @@ The setup wizard handles everything:
 ◆  OpenCode
 ◆  Beads
 ◆  Go
-▲  Agent Mail (optional)
+▲  Swarm Mail (optional)
 ▲  Redis (optional)
 │
 ◆  Install optional dependencies?
-│  ◻ Agent Mail - Multi-agent coordination
+│  ◻ Swarm Mail - Multi-agent coordination
 │  ◻ Redis - Rate limiting
 │
 ◇  Setting up OpenCode integration...
@@ -271,16 +271,16 @@ What NOT to do...
 
 ## Dependencies
 
-| Dependency                                                                                             | Purpose                                                      | Required |
-| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ | -------- |
-| [OpenCode](https://opencode.ai)                                                                        | Plugin host                                                  | Yes      |
-| [Beads](https://github.com/steveyegge/beads)                                                           | Git-backed issue tracking                                    | Yes      |
-| [Go](https://go.dev)                                                                                   | Required for Agent Mail                                      | No       |
-| [MCP Agent Mail](https://github.com/Dicklesworthstone/mcp_agent_mail)                                  | Multi-agent coordination, file reservations                  | No       |
-| [CASS (Coding Agent Session Search)](https://github.com/Dicklesworthstone/coding_agent_session_search) | Historical context from past sessions                        | No       |
-| [UBS (Ultimate Bug Scanner)](https://github.com/Dicklesworthstone/ultimate_bug_scanner)                | Pre-completion bug scanning using AI-powered static analysis | No       |
-| [semantic-memory](https://github.com/joelhooks/semantic-memory)                                        | Learning persistence                                         | No       |
-| [Redis](https://redis.io)                                                                              | Rate limiting (SQLite fallback available)                    | No       |
+| Dependency                                                                                             | Purpose                                                                                                | Required |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | -------- |
+| [OpenCode](https://opencode.ai)                                                                        | Plugin host                                                                                            | Yes      |
+| [Beads](https://github.com/steveyegge/beads)                                                           | Git-backed issue tracking                                                                              | Yes      |
+| [Go](https://go.dev)                                                                                   | Required for Swarm Mail                                                                                | No       |
+| [MCP Agent Mail](https://github.com/Dicklesworthstone/mcp_agent_mail) ⭐                               | **The original** - Multi-agent coordination, file reservations. Swarm Mail is built on these patterns. | No       |
+| [CASS (Coding Agent Session Search)](https://github.com/Dicklesworthstone/coding_agent_session_search) | Historical context from past sessions                                                                  | No       |
+| [UBS (Ultimate Bug Scanner)](https://github.com/Dicklesworthstone/ultimate_bug_scanner)                | Pre-completion bug scanning using AI-powered static analysis                                           | No       |
+| [semantic-memory](https://github.com/joelhooks/semantic-memory)                                        | Learning persistence                                                                                   | No       |
+| [Redis](https://redis.io)                                                                              | Rate limiting (SQLite fallback available)                                                              | No       |
 
 All dependencies are checked and can be installed via `swarm setup`.
 
@@ -298,11 +298,13 @@ curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/ultimate_bug_sca
 curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/coding_agent_session_search/main/install.sh | bash -s -- --easy-mode
 ```
 
-**MCP Agent Mail** - Multi-agent coordination and file reservations:
+**MCP Agent Mail** ⭐ - The original multi-agent coordination system. Swarm Mail's embedded implementation is inspired by and compatible with MCP Agent Mail's protocol:
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/mcp_agent_mail/main/scripts/install.sh" | bash -s -- --yes
 ```
+
+> **Note:** You can use either MCP Agent Mail (external Go server) or the embedded Swarm Mail (PGLite in-process). The embedded version is experimental - for production multi-agent workflows, MCP Agent Mail is recommended.
 
 ## Tools Reference
 
@@ -315,7 +317,7 @@ curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/mcp_agent_mail/m
 | `swarm_plan_prompt`            | Generate strategy-specific planning prompt with CASS history              |
 | `swarm_decompose`              | Generate decomposition prompt                                             |
 | `swarm_validate_decomposition` | Validate response, detect file conflicts                                  |
-| `swarm_spawn_subtask`          | Generate worker agent prompt with Agent Mail/beads instructions           |
+| `swarm_spawn_subtask`          | Generate worker agent prompt with Swarm Mail/beads instructions           |
 | `swarm_status`                 | Get swarm progress by epic ID                                             |
 | `swarm_progress`               | Report subtask progress to coordinator                                    |
 | `swarm_complete`               | Complete subtask - runs UBS (Ultimate Bug Scanner), releases reservations |
@@ -333,9 +335,9 @@ curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/mcp_agent_mail/m
 | `beads_start`       | Mark bead as in-progress                       |
 | `beads_ready`       | Get next unblocked bead                        |
 | `beads_sync`        | Sync to git and push                           |
-| `beads_link_thread` | Link bead to Agent Mail thread                 |
+| `beads_link_thread` | Link bead to Swarm Mail thread                 |
 
-### Agent Mail
+### Swarm Mail
 
 | Tool                         | Description                                    |
 | ---------------------------- | ---------------------------------------------- |
@@ -348,11 +350,26 @@ curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/mcp_agent_mail/m
 | `agentmail_release`          | Release file reservations                      |
 | `agentmail_ack`              | Acknowledge message                            |
 | `agentmail_search`           | Search messages by keyword                     |
-| `agentmail_health`           | Check if Agent Mail server is running          |
+| `agentmail_health`           | Check if Swarm Mail server is running          |
 
 ## Event-Sourced Architecture (Embedded)
 
-The plugin includes an embedded event-sourced Agent Mail implementation as an alternative to the external MCP server. This provides the same multi-agent coordination capabilities without requiring a separate server process.
+> **🙏 Built on the shoulders of giants**
+>
+> The Swarm Mail system is deeply inspired by and builds upon [**MCP Agent Mail**](https://github.com/Dicklesworthstone/mcp_agent_mail) by [@Dicklesworthstone](https://github.com/Dicklesworthstone). The original MCP Agent Mail pioneered multi-agent coordination patterns including file reservations, thread-based messaging, and agent registration - concepts that form the foundation of this embedded implementation.
+>
+> If you need a production-ready, battle-tested solution with a full Go server, **use MCP Agent Mail directly**. This embedded version is an experimental alternative that trades the external server for in-process PGLite, optimized for single-machine development workflows.
+>
+> **Key contributions from MCP Agent Mail:**
+>
+> - File reservation protocol with conflict detection
+> - Agent registration and heartbeat patterns
+> - Thread-based message organization
+> - Importance levels and acknowledgment tracking
+>
+> Thank you to the MCP Agent Mail team for open-sourcing such a well-designed system.
+
+The plugin includes an embedded event-sourced Swarm Mail implementation as an alternative to the external MCP server. This provides the same multi-agent coordination capabilities without requiring a separate server process.
 
 ### Architecture Comparison
 

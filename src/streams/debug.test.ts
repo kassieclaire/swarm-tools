@@ -371,12 +371,13 @@ describe("Debug Tools", () => {
         reason: "Broad reservation",
       });
 
-      // Agent2 tries to reserve src/specific.ts
+      // Agent2 forces reservation of src/specific.ts (to test conflict detection)
       await reserveAgentFiles({
         projectPath,
         agentName: "Agent2",
         paths: ["src/specific.ts"],
         reason: "Specific file",
+        force: true, // Force to create overlapping reservation for conflict test
       });
 
       const result = await debugReservations({
@@ -420,10 +421,13 @@ describe("Debug Tools", () => {
 
     it("filters by time range", async () => {
       await initAgent({ projectPath, agentName: "Agent1" });
+
+      // Wait to ensure timestamp separation
+      await new Promise((r) => setTimeout(r, 5));
       const afterFirst = Date.now();
 
-      // Wait a bit
-      await new Promise((r) => setTimeout(r, 10));
+      // Wait a bit more
+      await new Promise((r) => setTimeout(r, 5));
 
       await initAgent({ projectPath, agentName: "Agent2" });
 

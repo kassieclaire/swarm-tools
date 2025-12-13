@@ -225,14 +225,22 @@ export async function replayEvents(
   // Optionally clear materialized views
   if (options.clearViews) {
     if (options.projectKey) {
-      await db.exec(`
-        DELETE FROM message_recipients WHERE message_id IN (
-          SELECT id FROM messages WHERE project_key = '${options.projectKey}'
-        );
-        DELETE FROM messages WHERE project_key = '${options.projectKey}';
-        DELETE FROM reservations WHERE project_key = '${options.projectKey}';
-        DELETE FROM agents WHERE project_key = '${options.projectKey}';
-      `);
+      // Use parameterized queries to prevent SQL injection
+      await db.query(
+        `DELETE FROM message_recipients WHERE message_id IN (
+          SELECT id FROM messages WHERE project_key = $1
+        )`,
+        [options.projectKey],
+      );
+      await db.query(`DELETE FROM messages WHERE project_key = $1`, [
+        options.projectKey,
+      ]);
+      await db.query(`DELETE FROM reservations WHERE project_key = $1`, [
+        options.projectKey,
+      ]);
+      await db.query(`DELETE FROM agents WHERE project_key = $1`, [
+        options.projectKey,
+      ]);
     } else {
       await db.exec(`
         DELETE FROM message_recipients;

@@ -146,6 +146,7 @@ export interface ReserveFilesOptions {
   reason?: string;
   exclusive?: boolean;
   ttlSeconds?: number;
+  force?: boolean;
 }
 
 export interface GrantedReservation {
@@ -380,6 +381,7 @@ export async function reserveAgentFiles(
     reason,
     exclusive = true,
     ttlSeconds = DEFAULT_TTL_SECONDS,
+    force = false,
   } = options;
 
   // Check for conflicts first
@@ -390,7 +392,19 @@ export async function reserveAgentFiles(
     projectPath,
   );
 
-  // Create reservations
+  // If conflicts exist and not forcing, reject reservation
+  if (conflicts.length > 0 && !force) {
+    return {
+      granted: [],
+      conflicts: conflicts.map((c) => ({
+        path: c.path,
+        holder: c.holder,
+        pattern: c.pattern,
+      })),
+    };
+  }
+
+  // Only create reservations if no conflicts or force=true
   const event = await reserveFiles(
     projectPath,
     agentName,

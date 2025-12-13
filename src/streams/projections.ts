@@ -1,5 +1,5 @@
 /**
- * Projections Layer - Query materialized views
+ * Swarm Mail Projections Layer - Query materialized views
  *
  * Projections are the read-side of CQRS. They query denormalized
  * materialized views for fast reads. Views are updated by the

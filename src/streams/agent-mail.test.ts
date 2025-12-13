@@ -516,6 +516,124 @@ describe("Agent Mail Tools", () => {
 
       expect(result.granted[0]?.expiresAt).toBeGreaterThan(Date.now());
     });
+
+    it("rejects reservation when conflicts exist (THE FIX)", async () => {
+      const agent1 = await initAgent({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: "Agent1",
+      });
+      const agent2 = await initAgent({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: "Agent2",
+      });
+
+      // Agent1 reserves src/**
+      await reserveAgentFiles({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: agent1.agentName,
+        paths: ["src/**"],
+        reason: "bd-123: Working on src",
+      });
+
+      // Agent2 tries to reserve src/file.ts - should be rejected
+      const result = await reserveAgentFiles({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: agent2.agentName,
+        paths: ["src/file.ts"],
+        reason: "bd-124: Trying to edit file",
+      });
+
+      // No reservations granted
+      expect(result.granted).toHaveLength(0);
+      // But conflicts reported
+      expect(result.conflicts).toHaveLength(1);
+      expect(result.conflicts[0]?.holder).toBe("Agent1");
+      expect(result.conflicts[0]?.pattern).toBe("src/**");
+      expect(result.conflicts[0]?.path).toBe("src/file.ts");
+    });
+
+    it("allows reservation with force=true despite conflicts", async () => {
+      const agent1 = await initAgent({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: "Agent1",
+      });
+      const agent2 = await initAgent({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: "Agent2",
+      });
+
+      // Agent1 reserves src/**
+      await reserveAgentFiles({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: agent1.agentName,
+        paths: ["src/**"],
+        reason: "bd-123: Working on src",
+      });
+
+      // Agent2 forces reservation despite conflict
+      const result = await reserveAgentFiles({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: agent2.agentName,
+        paths: ["src/file.ts"],
+        reason: "bd-124: Emergency fix",
+        force: true,
+      });
+
+      // Reservation granted with force
+      expect(result.granted).toHaveLength(1);
+      expect(result.granted[0]?.path).toBe("src/file.ts");
+      // Conflicts still reported
+      expect(result.conflicts).toHaveLength(1);
+      expect(result.conflicts[0]?.holder).toBe("Agent1");
+    });
+
+    it("grants reservation when no conflicts exist", async () => {
+      const agent = await initAgent({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: "Agent1",
+      });
+
+      // First reservation - no conflicts
+      const result = await reserveAgentFiles({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: agent.agentName,
+        paths: ["src/new-file.ts"],
+        reason: "bd-125: Creating new file",
+      });
+
+      expect(result.granted).toHaveLength(1);
+      expect(result.conflicts).toHaveLength(0);
+    });
+
+    it("rejects multiple conflicting paths atomically", async () => {
+      const agent1 = await initAgent({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: "Agent1",
+      });
+      const agent2 = await initAgent({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: "Agent2",
+      });
+
+      // Agent1 reserves multiple paths
+      await reserveAgentFiles({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: agent1.agentName,
+        paths: ["src/a.ts", "src/b.ts"],
+      });
+
+      // Agent2 tries to reserve same paths - all should be rejected
+      const result = await reserveAgentFiles({
+        projectPath: TEST_PROJECT_PATH,
+        agentName: agent2.agentName,
+        paths: ["src/a.ts", "src/b.ts", "src/c.ts"], // Mix of conflicts + available
+      });
+
+      // No reservations granted (even for src/c.ts)
+      expect(result.granted).toHaveLength(0);
+      // Conflicts for the reserved paths
+      expect(result.conflicts.length).toBeGreaterThan(0);
+    });
   });
 
   // ==========================================================================

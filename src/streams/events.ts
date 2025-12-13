@@ -1,5 +1,5 @@
 /**
- * Event Types for Agent Mail Event Sourcing
+ * Event Types for Swarm Mail Event Sourcing
  *
  * All agent coordination operations are represented as immutable events.
  * Current state is computed by replaying events (projections).
