@@ -6,7 +6,7 @@ Proposed
 
 ## Context
 
-Following ADR-001's decision to adopt a monorepo structure, we need a detailed strategy for extracting the Swarm Mail actor-model primitives from the existing opencode-swarm-plugin codebase into a standalone `@swarm/mail` package.
+Following ADR-001's decision to adopt a monorepo structure, we need a detailed strategy for extracting the Swarm Mail actor-model primitives from the existing opencode-swarm-plugin codebase into a standalone `swarm-mail` package.
 
 The extraction must:
 
@@ -24,8 +24,8 @@ The extraction must:
 
 **Target Structure:**
 
-- `packages/@swarm/mail` - Standalone actor-model library
-- `packages/@swarm/plugin` - OpenCode integration (depends on @swarm/mail)
+- `packages/swarm-mail` - Standalone actor-model library
+- `packages/opencode-swarm-plugin` - OpenCode integration (depends on swarm-mail)
 
 ## Decision
 
@@ -34,7 +34,7 @@ The extraction must:
 **1.1 Identify Public API Surface**
 
 ```typescript
-// @swarm/mail will export:
+// swarm-mail will export:
 export {
   initializeSwarmMail,
   sendMessage,
@@ -52,7 +52,7 @@ export type { SwarmMailEvent, Message, FileReservation } from "./schemas";
 Use `dependency-cruiser` to detect:
 
 - Circular dependencies (fail build if found)
-- External dependencies (must be in @swarm/mail package.json)
+- External dependencies (must be in swarm-mail package.json)
 - Internal coupling (refactor before extraction)
 
 ```bash
@@ -71,46 +71,46 @@ Run full test suite with coverage:
 **2.1 Create Package Structure**
 
 ```bash
-mkdir -p packages/@swarm/mail/src/{streams,effect}
-mkdir -p packages/@swarm/plugin/src
+mkdir -p packages/swarm-mail/src/{streams,effect}
+mkdir -p packages/opencode-swarm-plugin/src
 ```
 
 **2.2 Move Files (Atomic Operation)**
 
 ```bash
 # Streams infrastructure
-git mv src/streams/* packages/@swarm/mail/src/streams/
+git mv src/streams/* packages/swarm-mail/src/streams/
 
 # Agent Mail API
-git mv src/agent-mail.ts packages/@swarm/mail/src/
-git mv src/swarm-mail.ts packages/@swarm/mail/src/
+git mv src/agent-mail.ts packages/swarm-mail/src/
+git mv src/swarm-mail.ts packages/swarm-mail/src/
 
 # Schemas
-git mv src/schemas/swarm-context.ts packages/@swarm/mail/src/schemas/
+git mv src/schemas/swarm-context.ts packages/swarm-mail/src/schemas/
 ```
 
 **2.3 Update Imports**
 
 ```typescript
-// Before (in @swarm/plugin):
+// Before (in opencode-swarm-plugin):
 import { initializeSwarmMail } from "../agent-mail";
 
 // After:
-import { initializeSwarmMail } from "@swarm/mail";
+import { initializeSwarmMail } from "swarm-mail";
 ```
 
 Run AST-based codemod:
 
 ```bash
-npx jscodeshift -t codemods/update-imports.js packages/@swarm/plugin/src/**/*.ts
+npx jscodeshift -t codemods/update-imports.js packages/opencode-swarm-plugin/src/**/*.ts
 ```
 
 **2.4 Configure Package Dependencies**
 
 ```json
-// packages/@swarm/mail/package.json
+// packages/swarm-mail/package.json
 {
-  "name": "@swarm/mail",
+  "name": "swarm-mail",
   "version": "0.1.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -121,11 +121,11 @@ npx jscodeshift -t codemods/update-imports.js packages/@swarm/plugin/src/**/*.ts
   }
 }
 
-// packages/@swarm/plugin/package.json
+// packages/opencode-swarm-plugin/package.json
 {
-  "name": "@swarm/plugin",
+  "name": "opencode-swarm-plugin",
   "dependencies": {
-    "@swarm/mail": "workspace:*"
+    "swarm-mail": "workspace:*"
   }
 }
 ```
@@ -133,13 +133,13 @@ npx jscodeshift -t codemods/update-imports.js packages/@swarm/plugin/src/**/*.ts
 **2.5 Migrate Tests**
 
 ```bash
-# Integration tests for @swarm/mail
-git mv src/agent-mail.integration.test.ts packages/@swarm/mail/src/
-git mv src/swarm-mail.integration.test.ts packages/@swarm/mail/src/
-git mv src/streams/**/*.test.ts packages/@swarm/mail/src/streams/
+# Integration tests for swarm-mail
+git mv src/agent-mail.integration.test.ts packages/swarm-mail/src/
+git mv src/swarm-mail.integration.test.ts packages/swarm-mail/src/
+git mv src/streams/**/*.test.ts packages/swarm-mail/src/streams/
 
-# Plugin-specific tests stay in @swarm/plugin
-# Update test imports to use @swarm/mail
+# Plugin-specific tests stay in opencode-swarm-plugin
+# Update test imports to use swarm-mail
 ```
 
 ### Phase 3: API Cleanup
@@ -147,7 +147,7 @@ git mv src/streams/**/*.test.ts packages/@swarm/mail/src/streams/
 **3.1 Define Public Exports**
 
 ```typescript
-// packages/@swarm/mail/src/index.ts
+// packages/swarm-mail/src/index.ts
 export {
   // High-level API
   initializeSwarmMail,
@@ -190,7 +190,7 @@ Use JSDoc `@internal` for non-public exports:
 ```typescript
 /**
  * @internal
- * Internal projection builder - do not use outside @swarm/mail
+ * Internal projection builder - do not use outside swarm-mail
  */
 export const buildProjection = ...
 ```
@@ -199,8 +199,8 @@ export const buildProjection = ...
 Support both named and default exports:
 
 ```typescript
-// Allow: import { initializeSwarmMail } from '@swarm/mail'
-// Allow: import SwarmMail from '@swarm/mail'
+// Allow: import { initializeSwarmMail } from 'swarm-mail'
+// Allow: import SwarmMail from 'swarm-mail'
 export default {
   initializeSwarmMail,
   sendMessage,
@@ -213,25 +213,25 @@ export default {
 **4.1 Re-export from Plugin**
 
 ```typescript
-// packages/@swarm/plugin/src/agent-mail.ts (deprecated wrapper)
+// packages/opencode-swarm-plugin/src/agent-mail.ts (deprecated wrapper)
 /**
- * @deprecated Import from '@swarm/mail' instead
+ * @deprecated Import from 'swarm-mail' instead
  */
 export {
   initializeSwarmMail,
   sendMessage,
   // ...
-} from "@swarm/mail";
+} from "swarm-mail";
 ```
 
 **4.2 Add Deprecation Warnings**
 
 ```typescript
-// packages/@swarm/plugin/src/index.ts
+// packages/opencode-swarm-plugin/src/index.ts
 if (process.env.NODE_ENV !== "production") {
   console.warn(
-    "[@swarm/plugin] Importing agent-mail APIs from @swarm/plugin is deprecated. " +
-      'Import from @swarm/mail instead: import { initializeSwarmMail } from "@swarm/mail"',
+    "[opencode-swarm-plugin] Importing agent-mail APIs from opencode-swarm-plugin is deprecated. " +
+      'Import from swarm-mail instead: import { initializeSwarmMail } from "swarm-mail"',
   );
 }
 ```
@@ -240,7 +240,7 @@ if (process.env.NODE_ENV !== "production") {
 
 - v0.1.0 - Initial extraction, both packages work
 - v0.2.0 - Add deprecation warnings
-- v1.0.0 - Remove re-exports, @swarm/mail required
+- v1.0.0 - Remove re-exports, swarm-mail required
 
 ### Phase 5: Verification
 
@@ -254,7 +254,7 @@ bun install
 # Build all packages
 turbo run build
 
-# Expected: @swarm/mail builds first, then @swarm/plugin
+# Expected: swarm-mail builds first, then opencode-swarm-plugin
 ```
 
 **5.2 Test Verification**
@@ -275,24 +275,24 @@ npx changeset add
 npx changeset version
 npm pack --dry-run
 
-# Expected: Valid tarball for @swarm/mail
+# Expected: Valid tarball for swarm-mail
 ```
 
 ## Consequences
 
 ### Easier
 
-- **Independent publishing** - @swarm/mail can be versioned separately
+- **Independent publishing** - swarm-mail can be versioned separately
 - **Clear boundaries** - Public API explicitly defined
-- **Standalone usage** - Other projects can use @swarm/mail without plugin
-- **Focused testing** - @swarm/mail tests independent of plugin
+- **Standalone usage** - Other projects can use swarm-mail without plugin
+- **Focused testing** - swarm-mail tests independent of plugin
 - **Type safety** - TypeScript enforces package boundaries
 
 ### More Difficult
 
 - **Import paths change** - All consumers must update imports
 - **Two-package maintenance** - Breaking changes require coordination
-- **Version alignment** - @swarm/plugin must specify compatible @swarm/mail version
+- **Version alignment** - opencode-swarm-plugin must specify compatible swarm-mail version
 - **Testing complexity** - Must test both standalone and integrated usage
 
 ### Risks & Mitigations
@@ -317,10 +317,10 @@ npm pack --dry-run
 
 ### Extraction Checklist
 
-- [ ] Create packages/@swarm/mail directory structure
-- [ ] Move src/streams/\* to @swarm/mail
-- [ ] Move agent-mail.ts, swarm-mail.ts to @swarm/mail
-- [ ] Update all imports in @swarm/plugin
+- [ ] Create packages/swarm-mail directory structure
+- [ ] Move src/streams/\* to swarm-mail
+- [ ] Move agent-mail.ts, swarm-mail.ts to swarm-mail
+- [ ] Update all imports in opencode-swarm-plugin
 - [ ] Configure package.json dependencies
 - [ ] Migrate integration tests
 - [ ] Add index.ts with public exports
@@ -329,21 +329,21 @@ npm pack --dry-run
 
 ### Post-Extraction Checklist
 
-- [ ] Add deprecation warnings in @swarm/plugin
+- [ ] Add deprecation warnings in opencode-swarm-plugin
 - [ ] Write migration guide for users
-- [ ] Generate TypeDoc for @swarm/mail API
+- [ ] Generate TypeDoc for swarm-mail API
 - [ ] Add README with usage examples
 - [ ] Configure Changesets for versioning
-- [ ] Publish @swarm/mail@0.1.0 to npm
-- [ ] Update @swarm/plugin to depend on published version
+- [ ] Publish swarm-mail@0.1.0 to npm
+- [ ] Update opencode-swarm-plugin to depend on published version
 
 ### Success Criteria
 
 - [ ] `bun run build` succeeds for both packages
 - [ ] All integration tests pass
 - [ ] No circular dependencies detected
-- [ ] Published @swarm/mail works in standalone project
-- [ ] @swarm/plugin works with published @swarm/mail
+- [ ] Published swarm-mail works in standalone project
+- [ ] opencode-swarm-plugin works with published swarm-mail
 - [ ] Type checking passes with no errors
 - [ ] Migration guide tested with real user
 
@@ -354,7 +354,7 @@ module.exports = function transformer(file, api) {
   const j = api.jscodeshift;
   const root = j(file.source);
 
-  // Replace ../agent-mail with @swarm/mail
+  // Replace ../agent-mail with swarm-mail
   root
     .find(j.ImportDeclaration, {
       source: {
@@ -363,7 +363,7 @@ module.exports = function transformer(file, api) {
       },
     })
     .forEach((path) => {
-      path.node.source.value = "@swarm/mail";
+      path.node.source.value = "swarm-mail";
     });
 
   return root.toSource();
@@ -385,8 +385,8 @@ module.exports = {
     {
       name: "no-plugin-in-mail",
       severity: "error",
-      from: { path: "^packages/@swarm/mail" },
-      to: { path: "^packages/@swarm/plugin" },
+      from: { path: "^packages/swarm-mail" },
+      to: { path: "^packages/opencode-swarm-plugin" },
     },
   ],
 };

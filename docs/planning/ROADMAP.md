@@ -13,7 +13,7 @@ This roadmap implements all 5 ADRs in phased releases over 12 weeks. Each phase 
 - [ ] Install Turborepo + configure turbo.json
 - [ ] Set up Changesets for versioning
 - [ ] Configure dependency-cruiser for circular dep detection
-- [ ] Create packages/@swarm/mail and packages/@swarm/plugin directories
+- [ ] Create packages/swarm-mail and packages/opencode-swarm-plugin directories
 - [ ] Set up TypeScript project references
 - [ ] Configure CI/CD with Turborepo caching
 
@@ -33,31 +33,31 @@ This roadmap implements all 5 ADRs in phased releases over 12 weeks. Each phase 
 
 ## Phase 1: Package Extraction (Weeks 1-2)
 
-**Goal:** Extract @swarm/mail package and publish to npm
+**Goal:** Extract swarm-mail package and publish to npm
 
 **ADRs:** ADR-001, ADR-002
 
 **Tasks:**
 
-- [ ] Move src/streams/\* to packages/@swarm/mail/src/streams/
-- [ ] Move agent-mail.ts, swarm-mail.ts to @swarm/mail
-- [ ] Update imports in @swarm/plugin to use @swarm/mail
+- [ ] Move src/streams/\* to packages/swarm-mail/src/streams/
+- [ ] Move agent-mail.ts, swarm-mail.ts to swarm-mail
+- [ ] Update imports in opencode-swarm-plugin to use swarm-mail
 - [ ] Migrate integration tests
-- [ ] Write @swarm/mail README with examples
-- [ ] Add deprecation warnings in @swarm/plugin
-- [ ] Publish @swarm/mail@0.1.0 to npm
+- [ ] Write swarm-mail README with examples
+- [ ] Add deprecation warnings in opencode-swarm-plugin
+- [ ] Publish swarm-mail@0.1.0 to npm
 
 **Deliverables:**
 
-- @swarm/mail published on npm
-- @swarm/plugin depends on @swarm/mail
+- swarm-mail published on npm
+- opencode-swarm-plugin depends on swarm-mail
 - Migration guide for existing users
 - TypeDoc API documentation
 
 **Success Criteria:**
 
 - All tests pass in both packages
-- @swarm/mail works in standalone project
+- swarm-mail works in standalone project
 - No circular dependencies
 - Published tarball <500KB
 
@@ -268,7 +268,7 @@ This roadmap implements all 5 ADRs in phased releases over 12 weeks. Each phase 
 
 | Version   | Phase | Features                       | ETA     |
 | --------- | ----- | ------------------------------ | ------- |
-| **0.1.0** | 1     | @swarm/mail package extraction | Week 2  |
+| **0.1.0** | 1     | swarm-mail package extraction | Week 2  |
 | **0.2.0** | 2     | Live queries, batch operations | Week 4  |
 | **0.3.0** | 3     | Priority, DLQ, TTL, pub/sub    | Week 7  |
 | **0.4.0** | 4     | DevTools UI + CLI              | Week 10 |
@@ -310,7 +310,7 @@ Phase 0 (Monorepo)
 
 **Phase 1 (Package Extraction):**
 
-- @swarm/mail used in 3+ external projects within 3 months
+- swarm-mail used in 3+ external projects within 3 months
 - Zero breaking changes reported by users
 
 **Phase 2 (Performance):**

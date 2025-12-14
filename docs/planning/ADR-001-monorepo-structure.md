@@ -30,37 +30,37 @@ Adopt a Turborepo + Bun monorepo structure with:
 ```
 opencode-swarm-plugin/
 ├── packages/
-│   ├── @swarm/mail/           # ~3K lines - Actor-model primitives
-│   │   ├── src/
-│   │   │   ├── streams/       # Event sourcing, projections, store
-│   │   │   ├── agent-mail.ts  # High-level API
-│   │   │   └── index.ts
-│   │   ├── package.json       # Independent versioning
-│   │   └── tsconfig.json
-│   └── @swarm/plugin/         # ~9K lines - OpenCode integration
+│   └── swarm-mail/            # ~3K lines - Actor-model primitives
 │       ├── src/
-│       │   ├── beads.ts
-│       │   ├── swarm-*.ts
-│       │   └── plugin.ts
-│       └── package.json       # Depends on @swarm/mail
+│       │   ├── streams/       # Event sourcing, projections, store
+│       │   ├── agent-mail.ts  # High-level API
+│       │   └── index.ts
+│       ├── package.json       # Independent versioning, published as "swarm-mail"
+│       └── tsconfig.json
+├── src/                       # opencode-swarm-plugin source (stays at root)
+│   ├── beads.ts
+│   ├── swarm-*.ts
+│   └── plugin.ts
 ├── apps/
 │   └── devtools/              # Future: SvelteKit DevTools UI
 ├── turbo.json                 # Task pipeline definitions
-├── package.json               # Root workspace config
+├── package.json               # Root = opencode-swarm-plugin, depends on swarm-mail
 └── .changeset/                # Publishing workflow
 ```
 
 **Package naming:**
 
-- `@swarm/mail` - Standalone actor-model library
-- `@swarm/plugin` - OpenCode integration (depends on @swarm/mail)
+- `swarm-mail` - Standalone actor-model library (npm: `swarm-mail`)
+- `opencode-swarm-plugin` - OpenCode integration (npm: `opencode-swarm-plugin`, depends on swarm-mail)
+
+Note: `swarm-mail` is intentionally agnostic of OpenCode - it's a general-purpose actor-model library that can be used in any TypeScript project.
 
 **Workspace dependencies:**
 
 ```json
 {
   "dependencies": {
-    "@swarm/mail": "workspace:*"
+    "swarm-mail": "workspace:*"
   }
 }
 ```
@@ -95,7 +95,7 @@ opencode-swarm-plugin/
 
 ### Easier
 
-- **Independent publishing** - @swarm/mail can be used in any TypeScript project
+- **Independent publishing** - `swarm-mail` can be used in any TypeScript project
 - **Clear boundaries** - Separation forces clean API design
 - **Parallel development** - Teams can work on packages independently
 - **Incremental builds** - Turborepo caches unchanged packages
@@ -105,7 +105,7 @@ opencode-swarm-plugin/
 ### More Difficult
 
 - **Initial migration** - ~2-3 days to restructure existing code
-- **Breaking changes** - Extracting @swarm/mail may reveal tight coupling
+- **Breaking changes** - Extracting swarm-mail may reveal tight coupling
 - **Circular dependencies** - Must carefully design package boundaries
 - **Version conflicts** - Workspace deps must align across packages
 - **Build complexity** - More moving parts (mitigated by Turborepo automation)
@@ -130,11 +130,11 @@ opencode-swarm-plugin/
 3. Set up workspace dependencies in root package.json
 4. Configure TypeScript project references
 
-### Phase 2: Extract @swarm/mail (Day 2-3)
+### Phase 2: Extract swarm-mail (Day 2-3)
 
-1. Move src/streams/\* to packages/@swarm/mail/src/streams/
-2. Move agent-mail.ts, swarm-mail.ts to @swarm/mail
-3. Update imports in @swarm/plugin to use @swarm/mail
+1. Move src/streams/\* to packages/swarm-mail/src/streams/
+2. Move agent-mail.ts, swarm-mail.ts to swarm-mail
+3. Update imports in opencode-swarm-plugin to use swarm-mail
 4. Run typecheck and fix breaking changes
 5. Migrate integration tests
 
@@ -147,7 +147,7 @@ opencode-swarm-plugin/
 
 ### Phase 4: Documentation (Day 5)
 
-1. Write @swarm/mail README with API examples
+1. Write swarm-mail README with API examples
 2. Create migration guide for existing users
 3. Add inline JSDoc comments for public API
 4. Generate TypeDoc API reference
@@ -156,10 +156,10 @@ opencode-swarm-plugin/
 
 - [ ] `bun run build` builds both packages in correct order
 - [ ] `bun run test` passes all tests in isolation
-- [ ] @swarm/plugin can import from @swarm/mail without errors
+- [ ] opencode-swarm-plugin can import from swarm-mail without errors
 - [ ] Changesets generates valid changelog entries
 - [ ] CI builds complete in <2 minutes (with caching)
-- [ ] Published @swarm/mail package works in standalone project
+- [ ] Published swarm-mail package works in standalone project
 
 ### Reference Implementation
 
