@@ -957,6 +957,112 @@ export class ErrorAccumulator {
 }
 
 // ============================================================================
+// Semantic Memory Integration Helpers
+// ============================================================================
+
+/**
+ * Format memory store instruction for successful task completion
+ *
+ * @param beadId - Bead ID that completed
+ * @param summary - Completion summary
+ * @param filesTouched - Files modified
+ * @param strategy - Decomposition strategy used (if applicable)
+ * @returns Memory store instruction object
+ */
+export function formatMemoryStoreOnSuccess(
+  beadId: string,
+  summary: string,
+  filesTouched: string[],
+  strategy?: DecompositionStrategy,
+): {
+  information: string;
+  metadata: string;
+  instruction: string;
+} {
+  const strategyInfo = strategy ? ` using ${strategy} strategy` : "";
+
+  return {
+    information: `Task "${beadId}" completed successfully${strategyInfo}.
+Key insight: ${summary}
+Files touched: ${filesTouched.join(", ") || "none"}`,
+    metadata: `swarm, success, ${beadId}, ${strategy || "completion"}`,
+    instruction:
+      "Store this successful completion in semantic-memory for future reference",
+  };
+}
+
+/**
+ * Format memory store instruction for architectural problems (3-strike)
+ *
+ * @param beadId - Bead ID that struck out
+ * @param failures - Array of failure attempts
+ * @returns Memory store instruction object
+ */
+export function formatMemoryStoreOn3Strike(
+  beadId: string,
+  failures: Array<{ attempt: string; reason: string }>,
+): {
+  information: string;
+  metadata: string;
+  instruction: string;
+} {
+  const failuresList = failures
+    .map((f, i) => `${i + 1}. ${f.attempt} - Failed: ${f.reason}`)
+    .join("\n");
+
+  return {
+    information: `Architecture problem detected in ${beadId}: Task failed after 3 attempts.
+Attempts:
+${failuresList}
+
+This indicates a structural issue requiring human decision, not another fix attempt.`,
+    metadata: `architecture, 3-strike, ${beadId}, failure`,
+    instruction:
+      "Store this architectural problem in semantic-memory to avoid similar patterns in future",
+  };
+}
+
+/**
+ * Format memory query instruction for task decomposition
+ *
+ * @param task - Task description
+ * @param limit - Max results to return
+ * @returns Memory query instruction object
+ */
+export function formatMemoryQueryForDecomposition(
+  task: string,
+  limit: number = 3,
+): {
+  query: string;
+  limit: number;
+  instruction: string;
+} {
+  return {
+    query: task,
+    limit,
+    instruction:
+      "Query semantic-memory for relevant past learnings about similar tasks before decomposition",
+  };
+}
+
+/**
+ * Format memory validation hint when CASS history helped
+ *
+ * @param beadId - Bead ID that benefited from CASS
+ * @returns Memory validation hint
+ */
+export function formatMemoryValidationHint(beadId: string): {
+  instruction: string;
+  context: string;
+} {
+  return {
+    instruction:
+      "If any semantic-memory entries helped with this task, validate them to reset decay timer",
+    context: `Task ${beadId} completed successfully with assistance from past learnings`,
+  };
+}
+
+// ============================================================================
 // Exports
 // ============================================================================
 

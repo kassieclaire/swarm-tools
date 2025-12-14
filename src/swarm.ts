@@ -38,6 +38,10 @@ import {
   outcomeToFeedback,
   ErrorAccumulator,
   ErrorEntrySchema,
+  formatMemoryStoreOnSuccess,
+  formatMemoryStoreOn3Strike,
+  formatMemoryQueryForDecomposition,
+  formatMemoryValidationHint,
   type OutcomeSignals,
   type ScoredOutcome,
   type FeedbackEvent,
@@ -1429,6 +1433,224 @@ export const swarm_plan_prompt = tool({
           "Parse agent response as JSON and validate with swarm_validate_decomposition",
         cass_history: cassResultInfo,
         skills: skillsInfo,
+        // Add semantic-memory query instruction
+        memory_query: formatMemoryQueryForDecomposition(args.task, 3),
+      },
+      null,
+      2,
+    );
+  },
+});
+
+/**
+ * Delegate task decomposition to a swarm/planner subagent
+ *
+ * Returns a prompt for spawning a planner agent that will handle all decomposition
+ * reasoning. This keeps the coordinator context lean by offloading:
+ * - Strategy selection
+ * - CASS queries
+ * - Skills discovery
+ * - File analysis
+ * - BeadTree generation
+ *
+ * The planner returns ONLY structured BeadTree JSON, which the coordinator
+ * validates and uses to create beads.
+ *
+ * @example
+ * ```typescript
+ * // Coordinator workflow:
+ * const delegateResult = await swarm_delegate_planning({
+ *   task: "Add user authentication",
+ *   context: "Next.js 14 app",
+ * });
+ *
+ * // Parse the result
+ * const { prompt, subagent_type } = JSON.parse(delegateResult);
+ *
+ * // Spawn subagent using Task tool
+ * const plannerResponse = await Task(prompt, subagent_type);
+ *
+ * // Validate the response
+ * await swarm_validate_decomposition({ response: plannerResponse });
+ * ```
+ */
+export const swarm_delegate_planning = tool({
+  description:
+    "Delegate task decomposition to a swarm/planner subagent. Returns a prompt to spawn the planner. Use this to keep coordinator context lean - all planning reasoning happens in the subagent.",
+  args: {
+    task: tool.schema.string().min(1).describe("The task to decompose"),
+    context: tool.schema
+      .string()
+      .optional()
+      .describe("Additional context to include"),
+    max_subtasks: tool.schema
+      .number()
+      .int()
+      .min(2)
+      .max(10)
+      .optional()
+      .default(5)
+      .describe("Maximum number of subtasks (default: 5)"),
+    strategy: tool.schema
+      .enum(["auto", "file-based", "feature-based", "risk-based"])
+      .optional()
+      .default("auto")
+      .describe("Decomposition strategy (default: auto-detect)"),
+    query_cass: tool.schema
+      .boolean()
+      .optional()
+      .default(true)
+      .describe("Query CASS for similar past tasks (default: true)"),
+  },
+  async execute(args) {
+    // Select strategy
+    let selectedStrategy: Exclude<DecompositionStrategy, "auto">;
+    let strategyReasoning: string;
+
+    if (args.strategy && args.strategy !== "auto") {
+      selectedStrategy = args.strategy;
+      strategyReasoning = `User-specified strategy: ${selectedStrategy}`;
+    } else {
+      const selection = selectStrategy(args.task);
+      selectedStrategy = selection.strategy;
+      strategyReasoning = selection.reasoning;
+    }
+
+    // Query CASS for similar past tasks
+    let cassContext = "";
+    let cassResultInfo: {
+      queried: boolean;
+      results_found?: number;
+      included_in_context?: boolean;
+      reason?: string;
+    };
+
+    if (args.query_cass !== false) {
+      const cassResult = await queryCassHistory(args.task, 3);
+      if (cassResult.status === "success") {
+        cassContext = formatCassHistoryForPrompt(cassResult.data);
+        cassResultInfo = {
+          queried: true,
+          results_found: cassResult.data.results.length,
+          included_in_context: true,
+        };
+      } else {
+        cassResultInfo = {
+          queried: true,
+          results_found: 0,
+          included_in_context: false,
+          reason: cassResult.status,
+        };
+      }
+    } else {
+      cassResultInfo = { queried: false, reason: "disabled" };
+    }
+
+    // Fetch skills context
+    let skillsContext = "";
+    let skillsInfo: { included: boolean; count?: number; relevant?: string[] } =
+      {
+        included: false,
+      };
+
+    const allSkills = await listSkills();
+    if (allSkills.length > 0) {
+      skillsContext = await getSkillsContextForSwarm();
+      const relevantSkills = await findRelevantSkills(args.task);
+      skillsInfo = {
+        included: true,
+        count: allSkills.length,
+        relevant: relevantSkills,
+      };
+
+      // Add suggestion for relevant skills
+      if (relevantSkills.length > 0) {
+        skillsContext += `\n\n**Suggested skills for this task**: ${relevantSkills.join(", ")}`;
+      }
+    }
+
+    // Format strategy guidelines
+    const strategyGuidelines = formatStrategyGuidelines(selectedStrategy);
+
+    // Combine user context
+    const contextSection = args.context
+      ? `## Additional Context\n${args.context}`
+      : "## Additional Context\n(none provided)";
+
+    // Build the planning prompt with clear instructions for JSON-only output
+    const planningPrompt = STRATEGY_DECOMPOSITION_PROMPT.replace(
+      "{task}",
+      args.task,
+    )
+      .replace("{strategy_guidelines}", strategyGuidelines)
+      .replace("{context_section}", contextSection)
+      .replace("{cass_history}", cassContext || "")
+      .replace("{skills_context}", skillsContext || "")
+      .replace("{max_subtasks}", (args.max_subtasks ?? 5).toString());
+
+    // Add strict JSON-only instructions for the subagent
+    const subagentInstructions = `
+## CRITICAL: Output Format
+
+You are a planner subagent. Your ONLY output must be valid JSON matching the BeadTree schema.
+
+DO NOT include:
+- Explanatory text before or after the JSON
+- Markdown code fences (\`\`\`json)
+- Commentary or reasoning
+
+OUTPUT ONLY the raw JSON object.
+
+## Example Output
+
+{
+  "epic": {
+    "title": "Add user authentication",
+    "description": "Implement OAuth-based authentication system"
+  },
+  "subtasks": [
+    {
+      "title": "Set up OAuth provider",
+      "description": "Configure OAuth client credentials and redirect URLs",
+      "files": ["src/auth/oauth.ts", "src/config/auth.ts"],
+      "dependencies": [],
+      "estimated_complexity": 2
+    },
+    {
+      "title": "Create auth routes",
+      "description": "Implement login, logout, and callback routes",
+      "files": ["src/app/api/auth/[...nextauth]/route.ts"],
+      "dependencies": [0],
+      "estimated_complexity": 3
+    }
+  ]
+}
+
+Now generate the BeadTree for the given task.`;
+
+    const fullPrompt = `${planningPrompt}\n\n${subagentInstructions}`;
+
+    // Return structured output for coordinator
+    return JSON.stringify(
+      {
+        prompt: fullPrompt,
+        subagent_type: "swarm/planner",
+        description: "Task decomposition planning",
+        strategy: {
+          selected: selectedStrategy,
+          reasoning: strategyReasoning,
+        },
+        expected_output: "BeadTree JSON (raw JSON, no markdown)",
+        next_steps: [
+          "1. Spawn subagent with Task tool using returned prompt",
+          "2. Parse subagent response as JSON",
+          "3. Validate with swarm_validate_decomposition",
+          "4. Create beads with beads_create_epic",
+        ],
+        cass_history: cassResultInfo,
+        skills: skillsInfo,
+        // Add semantic-memory query instruction
+        memory_query: formatMemoryQueryForDecomposition(args.task, 3),
       },
       null,
       2,
@@ -1537,6 +1759,8 @@ export const swarm_decompose = tool({
         validation_note:
           "Parse agent response as JSON and validate with BeadTreeSchema from schemas/bead.ts",
         cass_history: cassResultInfo,
+        // Add semantic-memory query instruction
+        memory_query: formatMemoryQueryForDecomposition(args.task, 3),
       },
       null,
       2,
@@ -2465,43 +2689,43 @@ export const swarm_complete = tool({
       importance: "normal",
     });
 
-    return JSON.stringify(
-      {
-        success: true,
-        bead_id: args.bead_id,
-        closed: true,
-        reservations_released: true,
-        message_sent: true,
-        verification_gate: verificationResult
-          ? {
-              passed: true,
-              summary: verificationResult.summary,
-              steps: verificationResult.steps.map((s) => ({
-                name: s.name,
-                passed: s.passed,
-                skipped: s.skipped,
-                skipReason: s.skipReason,
-              })),
-            }
-          : args.skip_verification
-            ? { skipped: true, reason: "skip_verification=true" }
-            : { skipped: true, reason: "no files_touched provided" },
-        ubs_scan: ubsResult
-          ? {
-              ran: true,
-              bugs_found: ubsResult.summary.total,
-              summary: ubsResult.summary,
-              warnings: ubsResult.bugs.filter((b) => b.severity !== "critical"),
-            }
-          : verificationResult
-            ? { ran: true, included_in_verification_gate: true }
-            : {
-                ran: false,
-                reason: args.skip_ubs_scan
-                  ? "skipped"
-                  : "no files or ubs unavailable",
-              },
-        learning_prompt: `## Reflection
+    // Build success response with semantic-memory integration
+    const response = {
+      success: true,
+      bead_id: args.bead_id,
+      closed: true,
+      reservations_released: true,
+      message_sent: true,
+      verification_gate: verificationResult
+        ? {
+            passed: true,
+            summary: verificationResult.summary,
+            steps: verificationResult.steps.map((s) => ({
+              name: s.name,
+              passed: s.passed,
+              skipped: s.skipped,
+              skipReason: s.skipReason,
+            })),
+          }
+        : args.skip_verification
+          ? { skipped: true, reason: "skip_verification=true" }
+          : { skipped: true, reason: "no files_touched provided" },
+      ubs_scan: ubsResult
+        ? {
+            ran: true,
+            bugs_found: ubsResult.summary.total,
+            summary: ubsResult.summary,
+            warnings: ubsResult.bugs.filter((b) => b.severity !== "critical"),
+          }
+        : verificationResult
+          ? { ran: true, included_in_verification_gate: true }
+          : {
+              ran: false,
+              reason: args.skip_ubs_scan
+                ? "skipped"
+                : "no files or ubs unavailable",
+            },
+      learning_prompt: `## Reflection
 
 Did you learn anything reusable during this subtask? Consider:
 
@@ -2513,10 +2737,15 @@ Did you learn anything reusable during this subtask? Consider:
 If you discovered something valuable, use \`swarm_learn\` or \`skills_create\` to preserve it as a skill for future swarms.
 
 Files touched: ${args.files_touched?.join(", ") || "none recorded"}`,
-      },
-      null,
-      2,
-    );
+      // Add semantic-memory integration on success
+      memory_store: formatMemoryStoreOnSuccess(
+        args.bead_id,
+        args.summary,
+        args.files_touched || [],
+      ),
+    };
+
+    return JSON.stringify(response, null, 2);
   },
 });
 
@@ -3453,6 +3682,7 @@ export const swarmTools = {
   swarm_init: swarm_init,
   swarm_select_strategy: swarm_select_strategy,
   swarm_plan_prompt: swarm_plan_prompt,
+  swarm_delegate_planning: swarm_delegate_planning,
   swarm_decompose: swarm_decompose,
   swarm_validate_decomposition: swarm_validate_decomposition,
   swarm_status: swarm_status,
@@ -3574,22 +3804,29 @@ export const swarm_check_strikes = tool({
 
         const strikedOut = record.strike_count >= 3;
 
-        return JSON.stringify(
-          {
-            bead_id: args.bead_id,
-            strike_count: record.strike_count,
-            is_striked_out: strikedOut,
-            failures: record.failures,
-            message: strikedOut
-              ? "⚠️ STRUCK OUT: 3 strikes reached. STOP and question the architecture."
-              : `Strike ${record.strike_count} recorded. ${3 - record.strike_count} remaining.`,
-            warning: strikedOut
-              ? "DO NOT attempt Fix #4. Call with action=get_prompt for architecture review."
-              : undefined,
-          },
-          null,
-          2,
-        );
+        // Build response with memory storage hint on 3-strike
+        const response: Record<string, unknown> = {
+          bead_id: args.bead_id,
+          strike_count: record.strike_count,
+          is_striked_out: strikedOut,
+          failures: record.failures,
+          message: strikedOut
+            ? "⚠️ STRUCK OUT: 3 strikes reached. STOP and question the architecture."
+            : `Strike ${record.strike_count} recorded. ${3 - record.strike_count} remaining.`,
+          warning: strikedOut
+            ? "DO NOT attempt Fix #4. Call with action=get_prompt for architecture review."
+            : undefined,
+        };
+
+        // Add semantic-memory storage hint on 3-strike
+        if (strikedOut) {
+          response.memory_store = formatMemoryStoreOn3Strike(
+            args.bead_id,
+            record.failures,
+          );
+        }
+
+        return JSON.stringify(response, null, 2);
       }
 
       case "clear": {
