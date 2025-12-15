@@ -10,6 +10,7 @@
  * All state changes go through events. Projections compute current state.
  */
 import { getDatabase, withTiming } from "./index";
+import type { DatabaseAdapter } from "../types/database";
 import {
   type AgentEvent,
   createEvent,
@@ -60,12 +61,17 @@ function parseTimestamp(timestamp: string): number {
  * Append an event to the log
  *
  * Also updates materialized views (agents, messages, reservations)
+ *
+ * @param event - Event to append
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function appendEvent(
   event: AgentEvent,
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<AgentEvent & { id: number; sequence: number }> {
-  const db = await getDatabase(projectPath);
+  const db = dbOverride ?? (await getDatabase(projectPath) as unknown as DatabaseAdapter);
 
   // Extract common fields
   const { type, project_key, timestamp, ...rest } = event;
@@ -106,13 +112,18 @@ export async function appendEvent(
 
 /**
  * Append multiple events in a transaction
+ *
+ * @param events - Events to append
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function appendEvents(
   events: AgentEvent[],
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<Array<AgentEvent & { id: number; sequence: number }>> {
   return withTiming("appendEvents", async () => {
-    const db = await getDatabase(projectPath);
+    const db = dbOverride ?? (await getDatabase(projectPath) as unknown as DatabaseAdapter);
     const results: Array<AgentEvent & { id: number; sequence: number }> = [];
 
     await db.exec("BEGIN");
@@ -168,6 +179,10 @@ export async function appendEvents(
 
 /**
  * Read events with optional filters
+ *
+ * @param options - Filter options
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function readEvents(
   options: {
@@ -180,9 +195,10 @@ export async function readEvents(
     offset?: number;
   } = {},
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<Array<AgentEvent & { id: number; sequence: number }>> {
   return withTiming("readEvents", async () => {
-    const db = await getDatabase(projectPath);
+    const db = dbOverride ?? (await getDatabase(projectPath) as unknown as DatabaseAdapter);
 
     const conditions: string[] = [];
     const params: unknown[] = [];
@@ -259,12 +275,17 @@ export async function readEvents(
 
 /**
  * Get the latest sequence number
+ *
+ * @param projectKey - Optional project key to filter by
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function getLatestSequence(
   projectKey?: string,
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<number> {
-  const db = await getDatabase(projectPath);
+  const db = dbOverride ?? (await getDatabase(projectPath) as unknown as DatabaseAdapter);
 
   const query = projectKey
     ? "SELECT MAX(sequence) as seq FROM events WHERE project_key = $1"
@@ -283,6 +304,10 @@ export async function getLatestSequence(
  * - Recovering from corruption
  * - Migrating to new schema
  * - Debugging state issues
+ *
+ * @param options - Replay options
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function replayEvents(
   options: {
@@ -291,10 +316,11 @@ export async function replayEvents(
     clearViews?: boolean;
   } = {},
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<{ eventsReplayed: number; duration: number }> {
   return withTiming("replayEvents", async () => {
     const startTime = Date.now();
-    const db = await getDatabase(projectPath);
+    const db = dbOverride ?? (await getDatabase(projectPath) as unknown as DatabaseAdapter);
 
     // Optionally clear materialized views
     if (options.clearViews) {
@@ -385,12 +411,15 @@ export async function replayEventsBatched(
     clearViews?: boolean;
   } = {},
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<{ eventsReplayed: number; duration: number }> {
   return withTiming("replayEventsBatched", async () => {
     const startTime = Date.now();
     const batchSize = options.batchSize ?? 1000;
     const fromSequence = options.fromSequence ?? 0;
-    const db = await getDatabase(projectPath);
+    const db =
+      dbOverride ??
+      ((await getDatabase(projectPath)) as unknown as DatabaseAdapter);
 
     // Optionally clear materialized views
     if (options.clearViews) {
@@ -473,7 +502,7 @@ export async function replayEventsBatched(
  * Views are denormalized for fast reads.
  */
 async function updateMaterializedViews(
-  db: Awaited<ReturnType<typeof getDatabase>>,
+  db: DatabaseAdapter,
   event: AgentEvent & { id: number; sequence: number },
 ): Promise<void> {
   try {
@@ -565,7 +594,7 @@ async function updateMaterializedViews(
 }
 
 async function handleAgentRegistered(
-  db: Awaited<ReturnType<typeof getDatabase>>,
+  db: DatabaseAdapter,
   event: AgentRegisteredEvent & { id: number; sequence: number },
 ): Promise<void> {
   await db.query(
@@ -588,7 +617,7 @@ async function handleAgentRegistered(
 }
 
 async function handleMessageSent(
-  db: Awaited<ReturnType<typeof getDatabase>>,
+  db: DatabaseAdapter,
   event: MessageSentEvent & { id: number; sequence: number },
 ): Promise<void> {
   console.log("[SwarmMail] Handling message sent event", {
@@ -641,7 +670,7 @@ async function handleMessageSent(
 }
 
 async function handleFileReserved(
-  db: Awaited<ReturnType<typeof getDatabase>>,
+  db: DatabaseAdapter,
   event: FileReservedEvent & { id: number; sequence: number },
 ): Promise<void> {
   console.log("[SwarmMail] Handling file reservation event", {
@@ -701,7 +730,7 @@ async function handleFileReserved(
 }
 
 async function handleFileReleased(
-  db: Awaited<ReturnType<typeof getDatabase>>,
+  db: DatabaseAdapter,
   event: AgentEvent & { id: number; sequence: number },
 ): Promise<void> {
   if (event.type !== "file_released") return;
@@ -730,7 +759,7 @@ async function handleFileReleased(
 }
 
 async function handleDecompositionGenerated(
-  db: Awaited<ReturnType<typeof getDatabase>>,
+  db: DatabaseAdapter,
   event: AgentEvent & { id: number; sequence: number },
 ): Promise<void> {
   if (event.type !== "decomposition_generated") return;
@@ -755,7 +784,7 @@ async function handleDecompositionGenerated(
 }
 
 async function handleSubtaskOutcome(
-  db: Awaited<ReturnType<typeof getDatabase>>,
+  db: DatabaseAdapter,
   event: AgentEvent & { id: number; sequence: number },
 ): Promise<void> {
   if (event.type !== "subtask_outcome") return;
@@ -855,7 +884,7 @@ async function handleSubtaskOutcome(
 }
 
 async function handleHumanFeedback(
-  db: Awaited<ReturnType<typeof getDatabase>>,
+  db: DatabaseAdapter,
   event: AgentEvent & { id: number; sequence: number },
 ): Promise<void> {
   if (event.type !== "human_feedback") return;
@@ -878,7 +907,7 @@ async function handleHumanFeedback(
 }
 
 async function handleSwarmCheckpointed(
-  db: Awaited<ReturnType<typeof getDatabase>>,
+  db: DatabaseAdapter,
   event: AgentEvent & { id: number; sequence: number },
 ): Promise<void> {
   if (event.type !== "swarm_checkpointed") return;
@@ -911,7 +940,7 @@ async function handleSwarmCheckpointed(
 }
 
 async function handleSwarmRecovered(
-  db: Awaited<ReturnType<typeof getDatabase>>,
+  db: DatabaseAdapter,
   event: AgentEvent & { id: number; sequence: number },
 ): Promise<void> {
   if (event.type !== "swarm_recovered") return;
@@ -988,6 +1017,12 @@ function computeTimeBalanceRatio(
 
 /**
  * Register an agent (creates event + updates view)
+ *
+ * @param projectKey - Project identifier
+ * @param agentName - Agent name
+ * @param options - Registration options
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function registerAgent(
   projectKey: string,
@@ -998,6 +1033,7 @@ export async function registerAgent(
     taskDescription?: string;
   } = {},
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<AgentRegisteredEvent & { id: number; sequence: number }> {
   const event = createEvent("agent_registered", {
     project_key: projectKey,
@@ -1007,13 +1043,22 @@ export async function registerAgent(
     task_description: options.taskDescription,
   });
 
-  return appendEvent(event, projectPath) as Promise<
+  return appendEvent(event, projectPath, dbOverride) as Promise<
     AgentRegisteredEvent & { id: number; sequence: number }
   >;
 }
 
 /**
  * Send a message (creates event + updates view)
+ *
+ * @param projectKey - Project identifier
+ * @param fromAgent - Sender agent name
+ * @param toAgents - Recipient agent names
+ * @param subject - Message subject
+ * @param body - Message body
+ * @param options - Message options
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function sendMessage(
   projectKey: string,
@@ -1027,6 +1072,7 @@ export async function sendMessage(
     ackRequired?: boolean;
   } = {},
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<MessageSentEvent & { id: number; sequence: number }> {
   const event = createEvent("message_sent", {
     project_key: projectKey,
@@ -1039,13 +1085,20 @@ export async function sendMessage(
     ack_required: options.ackRequired || false,
   });
 
-  return appendEvent(event, projectPath) as Promise<
+  return appendEvent(event, projectPath, dbOverride) as Promise<
     MessageSentEvent & { id: number; sequence: number }
   >;
 }
 
 /**
  * Reserve files (creates event + updates view)
+ *
+ * @param projectKey - Project identifier
+ * @param agentName - Agent reserving the files
+ * @param paths - File paths to reserve
+ * @param options - Reservation options
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function reserveFiles(
   projectKey: string,
@@ -1057,6 +1110,7 @@ export async function reserveFiles(
     ttlSeconds?: number;
   } = {},
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<FileReservedEvent & { id: number; sequence: number }> {
   const ttlSeconds = options.ttlSeconds || 3600;
   const event = createEvent("file_reserved", {
@@ -1069,7 +1123,7 @@ export async function reserveFiles(
     expires_at: Date.now() + ttlSeconds * 1000,
   });
 
-  return appendEvent(event, projectPath) as Promise<
+  return appendEvent(event, projectPath, dbOverride) as Promise<
     FileReservedEvent & { id: number; sequence: number }
   >;
 }

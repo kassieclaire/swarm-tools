@@ -104,8 +104,7 @@ import {
   type BeadCreateArgs,
   type EpicCreateResult,
 } from "./schemas";
-import { createEvent } from "./streams/events";
-import { appendEvent } from "./streams/store";
+import { createEvent, appendEvent } from "swarm-mail";
 
 /**
  * Custom error for bead operations

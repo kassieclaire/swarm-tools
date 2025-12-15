@@ -26,9 +26,9 @@ import {
   releaseSwarmFiles,
   acknowledgeSwarmMessage,
   checkSwarmHealth,
-} from "./streams/swarm-mail";
-import { getActiveReservations } from "./streams/projections";
-import type { MailSessionState } from "./streams/events";
+  getActiveReservations,
+  type MailSessionState,
+} from "swarm-mail";
 import {
   existsSync,
   mkdirSync,

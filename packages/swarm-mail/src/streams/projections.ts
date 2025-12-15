@@ -12,6 +12,7 @@
  * - checkConflicts: Detect reservation conflicts
  */
 import { getDatabase } from "./index";
+import type { DatabaseAdapter } from "../types/database";
 import { minimatch } from "minimatch";
 
 // ============================================================================
@@ -64,12 +65,17 @@ export interface Conflict {
 
 /**
  * Get all agents for a project
+ *
+ * @param projectKey - Project identifier
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function getAgents(
   projectKey: string,
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<Agent[]> {
-  const db = await getDatabase(projectPath);
+  const db = dbOverride ?? (await getDatabase(projectPath) as unknown as DatabaseAdapter);
 
   const result = await db.query<Agent>(
     `SELECT id, name, program, model, task_description, registered_at, last_active_at
@@ -84,13 +90,19 @@ export async function getAgents(
 
 /**
  * Get a specific agent by name
+ *
+ * @param projectKey - Project identifier
+ * @param agentName - Agent name to lookup
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function getAgent(
   projectKey: string,
   agentName: string,
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<Agent | null> {
-  const db = await getDatabase(projectPath);
+  const db = dbOverride ?? (await getDatabase(projectPath) as unknown as DatabaseAdapter);
 
   const result = await db.query<Agent>(
     `SELECT id, name, program, model, task_description, registered_at, last_active_at
@@ -116,14 +128,21 @@ export interface InboxOptions {
 
 /**
  * Get inbox messages for an agent
+ *
+ * @param projectKey - Project identifier
+ * @param agentName - Agent name to get inbox for
+ * @param options - Inbox query options
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function getInbox(
   projectKey: string,
   agentName: string,
   options: InboxOptions = {},
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<Message[]> {
-  const db = await getDatabase(projectPath);
+  const db = dbOverride ?? (await getDatabase(projectPath) as unknown as DatabaseAdapter);
 
   const {
     limit = 50,
@@ -166,13 +185,19 @@ export async function getInbox(
 
 /**
  * Get a single message by ID with full body
+ *
+ * @param projectKey - Project identifier
+ * @param messageId - Message ID to lookup
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function getMessage(
   projectKey: string,
   messageId: number,
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<Message | null> {
-  const db = await getDatabase(projectPath);
+  const db = dbOverride ?? (await getDatabase(projectPath) as unknown as DatabaseAdapter);
 
   const result = await db.query<Message>(
     `SELECT id, from_agent, subject, body, thread_id, importance, ack_required, created_at
@@ -186,13 +211,19 @@ export async function getMessage(
 
 /**
  * Get all messages in a thread
+ *
+ * @param projectKey - Project identifier
+ * @param threadId - Thread ID to lookup
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function getThreadMessages(
   projectKey: string,
   threadId: string,
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<Message[]> {
-  const db = await getDatabase(projectPath);
+  const db = dbOverride ?? (await getDatabase(projectPath) as unknown as DatabaseAdapter);
 
   const result = await db.query<Message>(
     `SELECT id, from_agent, subject, body, thread_id, importance, ack_required, created_at
@@ -211,13 +242,19 @@ export async function getThreadMessages(
 
 /**
  * Get active (non-expired, non-released) reservations
+ *
+ * @param projectKey - Project identifier
+ * @param projectPath - Optional project path for database location
+ * @param agentName - Optional agent name to filter by
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function getActiveReservations(
   projectKey: string,
   projectPath?: string,
   agentName?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<Reservation[]> {
-  const db = await getDatabase(projectPath);
+  const db = dbOverride ?? (await getDatabase(projectPath) as unknown as DatabaseAdapter);
 
   const now = Date.now();
   const baseQuery = `
@@ -249,15 +286,27 @@ export async function getActiveReservations(
  * - Another agent holds an exclusive reservation
  * - The path matches (exact or glob pattern)
  * - The reservation is still active
+ *
+ * @param projectKey - Project identifier
+ * @param agentName - Agent attempting reservation
+ * @param paths - Paths to check for conflicts
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function checkConflicts(
   projectKey: string,
   agentName: string,
   paths: string[],
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<Conflict[]> {
   // Get all active exclusive reservations from OTHER agents
-  const reservations = await getActiveReservations(projectKey, projectPath);
+  const reservations = await getActiveReservations(
+    projectKey,
+    projectPath,
+    undefined,
+    dbOverride,
+  );
 
   const conflicts: Conflict[] = [];
 
@@ -363,13 +412,19 @@ export interface EvalStats {
 
 /**
  * Get eval records with optional filters
+ *
+ * @param projectKey - Project identifier
+ * @param options - Query options
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function getEvalRecords(
   projectKey: string,
   options?: { limit?: number; strategy?: string },
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<EvalRecord[]> {
-  const db = await getDatabase(projectPath);
+  const db = dbOverride ?? (await getDatabase(projectPath) as unknown as DatabaseAdapter);
 
   const conditions = ["project_key = $1"];
   const params: (string | number)[] = [projectKey];
@@ -452,12 +507,17 @@ export async function getEvalRecords(
 
 /**
  * Get eval statistics for a project
+ *
+ * @param projectKey - Project identifier
+ * @param projectPath - Optional project path for database location
+ * @param dbOverride - Optional database adapter for dependency injection
  */
 export async function getEvalStats(
   projectKey: string,
   projectPath?: string,
+  dbOverride?: DatabaseAdapter,
 ): Promise<EvalStats> {
-  const db = await getDatabase(projectPath);
+  const db = dbOverride ?? (await getDatabase(projectPath) as unknown as DatabaseAdapter);
 
   // Get overall stats
   const overallResult = await db.query<{

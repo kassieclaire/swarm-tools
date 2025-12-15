@@ -31,7 +31,7 @@ import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
 import { isToolAvailable, warnMissingTool } from "./tool-availability";
 import { getRateLimiter, type RateLimiter } from "./rate-limiter";
-import type { MailSessionState } from "./streams/events";
+import type { MailSessionState } from "swarm-mail";
 
 // ============================================================================
 // Configuration

@@ -13,7 +13,7 @@
  * - agent-mail: DEPRECATED - Legacy MCP server (use swarm-mail instead)
  */
 
-import { checkSwarmHealth } from "./streams/swarm-mail";
+import { checkSwarmHealth } from "swarm-mail";
 
 /** Default timeout for URL reachability checks in milliseconds */
 const DEFAULT_URL_TIMEOUT_MS = 2000;

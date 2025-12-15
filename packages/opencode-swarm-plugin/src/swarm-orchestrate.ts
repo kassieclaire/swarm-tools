@@ -36,10 +36,10 @@ import {
   getSwarmInbox,
   releaseSwarmFiles,
   sendSwarmMessage,
-} from "./streams/swarm-mail";
-import { getAgent } from "./streams/projections";
-import { createEvent } from "./streams/events";
-import { appendEvent } from "./streams/store";
+  getAgent,
+  createEvent,
+  appendEvent,
+} from "swarm-mail";
 import {
   addStrike,
   clearStrikes,
@@ -872,7 +872,7 @@ export const swarm_progress = tool({
           await appendEvent(event, args.project_key);
 
           // Update swarm_contexts table
-          const { getDatabase } = await import("./streams/index");
+          const { getDatabase } = await import("swarm-mail");
           const db = await getDatabase(args.project_key);
           const now = Date.now();
           await db.query(
@@ -2062,7 +2062,7 @@ export const swarm_checkpoint = tool({
       await appendEvent(event, args.project_key);
 
       // Update swarm_contexts table for fast recovery
-      const { getDatabase } = await import("./streams/index");
+      const { getDatabase } = await import("swarm-mail");
       const db = await getDatabase(args.project_key);
 
       const now = Date.now();
@@ -2138,7 +2138,7 @@ export const swarm_recover = tool({
   },
   async execute(args) {
     try {
-      const { getDatabase } = await import("./streams/index");
+      const { getDatabase } = await import("swarm-mail");
       const db = await getDatabase(args.project_key);
 
       // Query most recent checkpoint for this epic
