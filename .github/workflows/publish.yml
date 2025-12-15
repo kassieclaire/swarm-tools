@@ -1,0 +1,51 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Update npm to latest (for OIDC support)
+        run: npm install -g npm@latest
+
+      - name: Verify npm version (requires 11.5.1+ for OIDC)
+        run: npm --version
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Type check
+        run: bun turbo typecheck
+
+      - name: Run tests
+        run: bun turbo test
+
+      - name: Build packages
+        run: bun turbo build
+
+      - name: Publish swarm-mail
+        working-directory: ./packages/swarm-mail
+        run: npm publish --access public --provenance
+
+      - name: Publish opencode-swarm-plugin
+        working-directory: ./packages/opencode-swarm-plugin
+        run: npm publish --access public --provenance

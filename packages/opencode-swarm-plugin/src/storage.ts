@@ -142,10 +142,50 @@ export interface StorageConfig {
 }
 
 /**
+ * Generate unique test collection name
+ *
+ * Creates a timestamp-based suffix for test collections to ensure complete isolation.
+ * Each test run gets its own collections that don't pollute production semantic-memory.
+ *
+ * @returns Unique suffix like "test-1734567890123"
+ *
+ * @example
+ * ```typescript
+ * // In test setup:
+ * process.env.TEST_SEMANTIC_MEMORY_COLLECTION = getTestCollectionName();
+ * // Results in collections like: swarm-feedback-test-1734567890123
+ * ```
+ */
+export function getTestCollectionName(): string {
+  return `test-${Date.now()}`;
+}
+
+/**
  * Get collection names with optional test suffix
  *
- * When TEST_MEMORY_COLLECTIONS=true, appends "-test" to all collection names
- * to isolate test data from production semantic-memory storage.
+ * Supports two test isolation modes:
+ * 1. TEST_MEMORY_COLLECTIONS=true - appends "-test" (shared across test run)
+ * 2. TEST_SEMANTIC_MEMORY_COLLECTION=<suffix> - appends custom suffix (unique per test run)
+ *
+ * Mode 2 is preferred for full isolation - prevents test pollution of production
+ * semantic-memory collections.
+ *
+ * @example
+ * ```typescript
+ * // Production
+ * getCollectionNames()
+ * // => { feedback: "swarm-feedback", patterns: "swarm-patterns", maturity: "swarm-maturity" }
+ *
+ * // Test mode 1 (legacy)
+ * process.env.TEST_MEMORY_COLLECTIONS = "true"
+ * getCollectionNames()
+ * // => { feedback: "swarm-feedback-test", patterns: "swarm-patterns-test", ... }
+ *
+ * // Test mode 2 (preferred - full isolation)
+ * process.env.TEST_SEMANTIC_MEMORY_COLLECTION = "test-1734567890123"
+ * getCollectionNames()
+ * // => { feedback: "swarm-feedback-test-1734567890123", patterns: "swarm-patterns-test-1734567890123", ... }
+ * ```
  */
 function getCollectionNames(): StorageCollections {
   const base = {
@@ -154,7 +194,17 @@ function getCollectionNames(): StorageCollections {
     maturity: "swarm-maturity",
   };
 
-  // Test isolation: suffix collections with "-test" when in test mode
+  // Test isolation mode 2 (preferred): unique suffix per test run
+  const testSuffix = process.env.TEST_SEMANTIC_MEMORY_COLLECTION;
+  if (testSuffix) {
+    return {
+      feedback: `${base.feedback}-${testSuffix}`,
+      patterns: `${base.patterns}-${testSuffix}`,
+      maturity: `${base.maturity}-${testSuffix}`,
+    };
+  }
+
+  // Test isolation mode 1 (legacy): shared "-test" suffix
   if (process.env.TEST_MEMORY_COLLECTIONS === "true") {
     return {
       feedback: `${base.feedback}-test`,
@@ -166,11 +216,27 @@ function getCollectionNames(): StorageCollections {
   return base;
 }
 
-export const DEFAULT_STORAGE_CONFIG: StorageConfig = {
-  backend: "semantic-memory",
-  collections: getCollectionNames(),
-  useSemanticSearch: true,
-};
+/**
+ * Get default storage configuration
+ *
+ * Returns a fresh config object on each call to ensure env vars (like
+ * TEST_SEMANTIC_MEMORY_COLLECTION) are read at runtime, not module load time.
+ *
+ * @returns Default storage configuration
+ */
+export function getDefaultStorageConfig(): StorageConfig {
+  return {
+    backend: "semantic-memory",
+    collections: getCollectionNames(),
+    useSemanticSearch: true,
+  };
+}
+
+/**
+ * @deprecated Use getDefaultStorageConfig() instead. This static export
+ * captures collections at module load time, breaking test isolation.
+ */
+export const DEFAULT_STORAGE_CONFIG: StorageConfig = getDefaultStorageConfig();
 
 // ============================================================================
 // Unified Storage Interface
@@ -261,7 +327,8 @@ export class SemanticMemoryStorage implements LearningStorage {
   private config: StorageConfig;
 
   constructor(config: Partial<StorageConfig> = {}) {
-    this.config = { ...DEFAULT_STORAGE_CONFIG, ...config };
+    // Use getDefaultStorageConfig() to ensure env vars are read at runtime
+    this.config = { ...getDefaultStorageConfig(), ...config };
     console.log(
       `[storage] SemanticMemoryStorage initialized with collections:`,
       this.config.collections,
@@ -723,7 +790,8 @@ export class InMemoryStorage implements LearningStorage {
 export function createStorage(
   config: Partial<StorageConfig> = {},
 ): LearningStorage {
-  const fullConfig = { ...DEFAULT_STORAGE_CONFIG, ...config };
+  // Use getDefaultStorageConfig() to ensure env vars are read at runtime
+  const fullConfig = { ...getDefaultStorageConfig(), ...config };
 
   switch (fullConfig.backend) {
     case "semantic-memory":

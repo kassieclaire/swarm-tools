@@ -4,10 +4,46 @@
  * Tests for confidence decay, feedback scoring, outcome tracking,
  * anti-patterns, pattern maturity, and swarm tool integrations.
  *
- * These tests don't require external services - they test the learning
- * algorithms and their integration with swarm tools.
+ * ## Test Isolation Pattern
+ *
+ * This file uses TEST_SEMANTIC_MEMORY_COLLECTION to isolate test data from
+ * production semantic-memory collections. Each test run gets a unique suffix,
+ * preventing pollution of the default collections.
+ *
+ * **Cleanup**: Test collections are NOT automatically deleted after test runs.
+ * This is intentional - semantic-memory doesn't provide bulk delete APIs.
+ * To clean up test artifacts, use:
+ *
+ * ```bash
+ * # Manual cleanup (use scripts/cleanup-test-memories.ts for automation)
+ * semantic-memory list --collection swarm-feedback-test-* --json | jq -r '.[].id' | xargs -I {} semantic-memory remove {}
+ * ```
+ *
+ * The unique suffix prevents cross-test interference even without cleanup.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  beforeAll,
+  afterAll,
+  vi,
+} from "vitest";
+import { getTestCollectionName } from "./storage";
+
+// ============================================================================
+// Test Isolation Setup
+// ============================================================================
+
+/**
+ * Set unique collection suffix for this test run
+ *
+ * CRITICAL: This MUST be set before any storage instances are created.
+ * The env var is read during getCollectionNames() which happens at storage init.
+ */
+process.env.TEST_SEMANTIC_MEMORY_COLLECTION = getTestCollectionName();
 
 // Learning module
 import {
@@ -72,6 +108,30 @@ const mockContext = {
   agent: "test-agent",
   abort: new AbortController().signal,
 };
+
+/**
+ * Global test lifecycle hooks
+ *
+ * These document the test isolation pattern but don't actively clean up.
+ * Cleanup is manual via scripts/cleanup-test-memories.ts
+ */
+beforeAll(() => {
+  console.log(
+    `[test] TEST_SEMANTIC_MEMORY_COLLECTION = ${process.env.TEST_SEMANTIC_MEMORY_COLLECTION}`,
+  );
+  console.log(
+    `[test] Test collections will be prefixed with: swarm-*-${process.env.TEST_SEMANTIC_MEMORY_COLLECTION}`,
+  );
+});
+
+afterAll(() => {
+  console.log(
+    `[test] Test complete. Collections NOT auto-deleted (use scripts/cleanup-test-memories.ts for cleanup)`,
+  );
+  console.log(
+    `[test] Test collection suffix was: ${process.env.TEST_SEMANTIC_MEMORY_COLLECTION}`,
+  );
+});
 
 /**
  * Create a feedback event for testing
@@ -1309,14 +1369,9 @@ describe("Storage Module", () => {
     beforeEach(async () => {
       isAvailable = await isSemanticMemoryAvailable();
       if (isAvailable) {
-        // Use unique collections per test run to ensure isolation
-        storage = new SemanticMemoryStorage({
-          collections: {
-            feedback: `test-feedback-learning-${Date.now()}`,
-            patterns: `test-patterns-learning-${Date.now()}`,
-            maturity: `test-maturity-learning-${Date.now()}`,
-          },
-        });
+        // Use default collections (which include TEST_SEMANTIC_MEMORY_COLLECTION suffix)
+        // This ensures all tests use the same isolated collections for this test run
+        storage = new SemanticMemoryStorage();
       }
     });
 
