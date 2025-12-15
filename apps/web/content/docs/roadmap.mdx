@@ -1,0 +1,267 @@
+---
+title: Roadmap
+description: Future plans and experimental features for Swarm Tools
+---
+
+# Roadmap
+
+Future plans for Swarm Tools. Organized by package and priority.
+
+## Current Status (v0.1.x)
+
+**What exists today:**
+- swarm-mail package (event sourcing, projections, durable primitives)
+- opencode-swarm-plugin (beads, swarm orchestration, learning, skills)
+- PGLite-based storage (local-first, no external servers)
+- Pattern maturity tracking with confidence decay
+- Anti-pattern detection and inversion
+
+**What works:**
+- Multi-agent task decomposition with file reservations
+- Event-sourced coordination with full audit trail
+- Durable primitives (mailbox, lock, cursor, deferred)
+- Skills system with bundled domain expertise
+- Learning from decomposition outcomes
+
+---
+
+## Near-Term (v0.2 - Q1 2025)
+
+### Performance Optimizations
+
+**Problem:** Polling-based inbox checking wastes CPU and adds latency.
+
+**Solution:** Live queries with PGLite's `LISTEN/NOTIFY` support.
+
+**Impact:**
+- Notification latency: 500ms → ~10ms (50x faster)
+- CPU usage: 5-10% → ~1% (5-10x reduction)
+- Zero polling queries in idle state
+
+**Deliverables:**
+- `watchInbox()` - Live inbox updates
+- `watchEvents()` - Live event stream
+- Batch message send API
+- Batch event append API
+
+---
+
+### Message Queue Features
+
+**Problem:** No priority handling, no dead-letter queue, no TTL cleanup.
+
+**Solution:** Priority queues (4 levels), DLQ with retry tracking, TTL with background cleanup.
+
+**Impact:**
+- Critical messages processed first (priority 0 = urgent)
+- Failed messages retry 3x before DLQ
+- Expired messages cleaned up automatically
+
+**Deliverables:**
+- Priority column in messages table
+- `failed_messages` table with retry logic
+- `expires_at` column with background cleanup job
+- Pub/sub with wildcard topic subscriptions
+
+---
+
+## Mid-Term (v0.3-v0.4 - Q2 2025)
+
+### DevTools + CLI
+
+**Problem:** No visibility into swarm coordination, debugging is manual.
+
+**Solution:** CLI + embeddable SvelteKit UI for observability.
+
+**Deliverables:**
+- CLI: `swarm events`, `swarm messages`, `swarm locks`, `swarm replay`
+- DevTools UI: event stream viewer, message inbox/outbox, file reservation timeline
+- Real-time updates via SSE
+- Static export (works offline)
+
+**Example:**
+
+```bash
+# Tail events in real-time
+swarm events --tail
+
+# Replay event stream from specific point
+swarm replay --from 1234
+
+# View file locks
+swarm locks
+```
+
+---
+
+### Metrics + Tracing
+
+**Problem:** No production monitoring, no distributed tracing.
+
+**Solution:** Prometheus metrics + OpenTelemetry tracing.
+
+**Deliverables:**
+- `/metrics` endpoint with Prometheus format
+- Message send/receive latency histogram
+- Lock contention histogram
+- Queue depth gauge
+- OpenTelemetry spans for message flows
+- Trace context propagation across agents
+- Grafana dashboard template
+- Jaeger/Zipkin integration guide
+
+---
+
+## Long-Term (v1.0+ - Q3 2025 and beyond)
+
+### Saga Pattern
+
+**Problem:** Long-running multi-agent workflows need orchestration and compensation (undo).
+
+**Solution:** Saga coordinator with compensation pattern.
+
+**Deliverables:**
+- `saga_instances` and `saga_steps` tables
+- Saga orchestration pattern
+- Compensation (undo) support for failed steps
+- Saga viewer in DevTools UI
+- 3+ example saga workflows
+
+**Example:**
+
+```typescript
+const saga = Saga.create('user-onboarding')
+  .step('create-account', createAccount, undoCreateAccount)
+  .step('send-email', sendWelcomeEmail, undoSendEmail)
+  .step('setup-profile', setupProfile, undoSetupProfile)
+  .execute();
+```
+
+---
+
+### Additional Standalone Packages
+
+**Potential future packages:**
+
+| Package | Purpose | Status |
+|---------|---------|--------|
+| `@swarmtools/vector` | Embeddings, vector storage for semantic search | Planned |
+| `@swarmtools/learning` | Pattern maturity, anti-pattern detection (extracted) | Planned |
+| `@swarmtools/skills` | Knowledge injection, SKILL.md format (extracted) | Planned |
+| `@swarmtools/structured` | Schema validation, JSON extraction (extracted) | Planned |
+| `@swarmtools/guardrails` | Rate limiting, output guards (extracted) | Planned |
+
+**Why extract?** Each package solves one problem well. Users can mix and match what they need without pulling in the entire plugin.
+
+---
+
+## Experimental Ideas (No ETA)
+
+### Auto-Healing Swarms
+
+Agents detect and recover from blockers autonomously without coordinator intervention.
+
+**Example:** Agent A is blocked on schema from Agent B. Agent A automatically sends a high-priority request to Agent B and waits for response.
+
+---
+
+### Semantic Code Search
+
+Vector-based codebase exploration for decomposition context. Query CASS + codebase embeddings for relevant files.
+
+**Example:** "Find all authentication-related files" returns ranked results based on semantic similarity.
+
+---
+
+### Prevention Pipeline Integration
+
+Auto-generate prevention patterns from debug sessions. Store in semantic memory and apply to future swarms.
+
+**Example:** After debugging "headers already sent" error, create UBS scanner rule and store prevention pattern for future decompositions.
+
+---
+
+### Multi-Project Coordination
+
+Cross-repo dependencies and shared context. Swarms coordinate across monorepo boundaries.
+
+**Example:** Frontend swarm waits for backend API schema swarm to complete before implementing client.
+
+---
+
+### Learning Export/Import
+
+Share pattern maturity across teams. Export learning data as JSON, import into other projects.
+
+**Example:** Team A's proven decomposition strategies become Team B's starting point.
+
+---
+
+## Community-Driven
+
+**Want a feature?** Open an issue on [GitHub](https://github.com/joelhooks/opencode-swarm-plugin).
+
+**Want to contribute?** We welcome PRs for:
+- New bundled skills
+- Custom database adapters
+- Performance improvements
+- Documentation enhancements
+
+---
+
+## Release Philosophy
+
+**Incremental value.** Each release delivers a complete feature that solves a real problem.
+
+**Backward compatibility.** Breaking changes only in major versions.
+
+**Performance first.** Optimizations come before new features.
+
+**Local-first.** No external dependencies or cloud services required.
+
+---
+
+## Version History
+
+| Version | Release | Key Features |
+|---------|---------|--------------|
+| **0.1.0** | Jan 2025 | swarm-mail package extraction, PGLite storage, durable primitives |
+| **0.2.0** | Q1 2025 (planned) | Live queries, batch operations, priority queues, DLQ |
+| **0.3.0** | Q2 2025 (planned) | DevTools UI, CLI, real-time observability |
+| **0.4.0** | Q2 2025 (planned) | Prometheus metrics, OpenTelemetry tracing |
+| **1.0.0** | Q3 2025 (planned) | Stable release with all core features |
+| **2.0.0** | TBD | Saga pattern, additional standalone packages |
+
+---
+
+## Success Metrics
+
+**v0.2 (Performance):**
+- 50x faster notification latency
+- 5x lower CPU usage
+- Zero polling in idle state
+
+**v0.3 (DevTools):**
+- 80% of developers use DevTools UI for debugging
+- CLI used in 50%+ of support cases
+
+**v0.4 (Observability):**
+- Metrics dashboard used in production monitoring
+- Distributed traces reduce debugging time by 50%
+
+**v1.0 (Adoption):**
+- swarm-mail used in 10+ external projects
+- 100+ GitHub stars
+- 5+ community-contributed skills
+
+---
+
+## Next Steps
+
+- [OpenCode Plugin Reference](/docs/opencode-plugin) - Current tool documentation
+- [Swarm Mail Architecture](/docs/swarm-mail) - Event sourcing deep dive
+- [GitHub Issues](https://github.com/joelhooks/opencode-swarm-plugin/issues) - Feature requests and bugs
+
+## License
+
+MIT - Use freely in commercial and open-source projects.

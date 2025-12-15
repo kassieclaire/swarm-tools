@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og';
 
 export const runtime = 'edge';
-export const alt = 'Swarm Tools - Framework-agnostic primitives for agentic systems';
+export const alt = 'Swarm Tools - Multi-Agent Coordination Primitives';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 

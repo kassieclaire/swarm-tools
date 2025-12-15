@@ -1,0 +1,177 @@
+---
+title: Quickstart
+description: Get up and running with Swarm Tools in 5 minutes
+---
+
+# Quickstart
+
+Get multi-agent coordination running in your project in under 5 minutes.
+
+## Prerequisites
+
+- Node.js 18+ or Bun
+- OpenCode CLI installed
+- A git repository
+
+## Install the Plugin
+
+```bash
+npm install -g opencode-swarm-plugin@latest
+```
+
+Or with Bun:
+
+```bash
+bun add -g opencode-swarm-plugin@latest
+```
+
+## Setup
+
+Run the setup wizard:
+
+```bash
+swarm setup
+```
+
+This will:
+1. Check for required dependencies (beads CLI)
+2. Configure OpenCode to load the plugin
+3. Initialize beads in your project (if not already)
+4. Verify everything works
+
+## Verify Installation
+
+```bash
+swarm doctor
+```
+
+Expected output:
+```
+✓ Beads CLI installed
+✓ OpenCode plugin configured
+✓ Beads initialized in project
+✓ All systems ready
+```
+
+## Your First Swarm
+
+In OpenCode, run:
+
+```
+/swarm "Add a health check endpoint at /api/health"
+```
+
+The plugin will:
+1. Analyze the task
+2. Decompose into subtasks (if needed)
+3. Create beads for tracking
+4. Spawn worker agents
+5. Coordinate file reservations
+6. Report completion
+
+## Manual Workflow
+
+If you prefer step-by-step control:
+
+```typescript
+// 1. Check what's ready to work on
+beads_ready()
+
+// 2. Start a task
+beads_start({ id: "bd-123" })
+
+// 3. Initialize coordination (for multi-agent work)
+swarmmail_init({ project_path: "/your/project" })
+
+// 4. Reserve files before editing
+swarmmail_reserve({
+  paths: ["src/api/**"],
+  reason: "bd-123: Health endpoint"
+})
+
+// 5. Do your work...
+
+// 6. Complete the task
+swarm_complete({
+  project_key: "/your/project",
+  agent_name: "YourAgent",
+  bead_id: "bd-123",
+  summary: "Added /api/health endpoint",
+  files_touched: ["src/api/health.ts"]
+})
+
+// 7. Sync to git (MANDATORY)
+beads_sync()
+```
+
+## Using Skills
+
+Load domain expertise into your context:
+
+```typescript
+// List available skills
+skills_list()
+
+// Load a skill for your current task
+skills_use({ name: "testing-patterns" })
+```
+
+Bundled skills include:
+- **testing-patterns** - Dependency breaking, characterization tests
+- **swarm-coordination** - Multi-agent orchestration
+- **cli-builder** - Building command-line tools
+- **system-design** - Architecture decisions
+
+## Key Commands
+
+| Command | Purpose |
+|---------|---------|
+| `swarm setup` | Initial configuration |
+| `swarm doctor` | Check dependencies |
+| `swarm init` | Initialize beads in project |
+| `swarm config` | Show config paths |
+
+## Key Tools
+
+| Tool | Purpose |
+|------|---------|
+| `beads_ready()` | Get next unblocked task |
+| `beads_sync()` | Sync to git (MANDATORY at session end) |
+| `swarmmail_init()` | Initialize coordination |
+| `swarmmail_reserve()` | Reserve files for editing |
+| `swarm_complete()` | Complete task with cleanup |
+| `skills_use()` | Load domain expertise |
+
+## What's Next
+
+- [OpenCode Plugin Reference](/docs/opencode-plugin) - All 40+ tools documented
+- [Philosophy](/docs/philosophy) - Design principles and mental models
+- [Patterns](/docs/patterns) - Coordination patterns and best practices
+- [Swarm Mail Architecture](/docs/swarm-mail) - Event sourcing deep dive
+
+## Troubleshooting
+
+**"beads not found"**
+```bash
+curl -sSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
+```
+
+**"swarmmail_init failed"**
+- Ensure you're in a git repository
+- Check that `.opencode/` directory is writable
+
+**"Plugin not loading"**
+```bash
+swarm setup  # Re-run setup
+swarm doctor # Check what's missing
+```
+
+## Session Checklist
+
+Every session should:
+
+1. **Start**: `beads_ready()` - What's next?
+2. **Work**: Use tools, reserve files, communicate
+3. **End**: `beads_sync()` + `git push` - Land the plane
+
+The plane is not landed until `git push` succeeds.

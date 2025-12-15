@@ -2,6 +2,9 @@
 
 OpenCode plugin for multi-agent swarm coordination with learning capabilities.
 
+**🌐 Website:** [swarmtools.ai](https://swarmtools.ai)  
+**📚 Full Documentation:** [swarmtools.ai/docs](https://swarmtools.ai/docs)
+
 ```
  ███████╗██╗    ██╗ █████╗ ██████╗ ███╗   ███╗
  ██╔════╝██║    ██║██╔══██╗██╔══██╗████╗ ████║
@@ -153,6 +156,24 @@ swarm doctor    # Check dependencies
 swarm init      # Initialize beads in project
 swarm config    # Show config file paths
 ```
+
+## Roadmap
+
+### Planned Features
+
+- **Enhanced Learning** - Pattern extraction from successful/failed decompositions
+- **Swarm Observability** - Real-time visualization of agent coordination
+- **Advanced Strategies** - Risk-based decomposition, critical path optimization
+- **Multi-Project Coordination** - Cross-repo dependencies and shared context
+- **Learning Export/Import** - Share pattern maturity across teams
+
+### Experimental
+
+- **Auto-healing Swarms** - Agents detect and recover from blockers autonomously
+- **Semantic Code Search** - Vector-based codebase exploration for decomposition context
+- **Prevention Pipeline Integration** - Auto-generate prevention patterns from debug sessions
+
+See [swarmtools.ai/docs](https://swarmtools.ai/docs) for latest updates and detailed guides.
 
 ## License
 

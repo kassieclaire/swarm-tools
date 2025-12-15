@@ -1,0 +1,933 @@
+---
+title: OpenCode Plugin Reference
+description: Complete reference for all beads, swarm mail, swarm, and skills tools
+---
+
+# OpenCode Plugin Reference
+
+The opencode-swarm-plugin provides 40+ tools for multi-agent coordination, task decomposition, and learning systems. All tools are type-safe with Zod validation.
+
+## Installation
+
+```bash
+npm install -g opencode-swarm-plugin@latest
+swarm setup
+```
+
+## Tool Categories
+
+- [Beads Tools](#beads-tools) - Git-backed issue tracking (8 tools)
+- [Swarm Mail Tools](#swarm-mail-tools) - Inter-agent messaging (6 tools)
+- [Swarm Tools](#swarm-tools) - Task orchestration (20+ tools)
+- [Skills Tools](#skills-tools) - Knowledge injection (4 tools)
+
+---
+
+## Beads Tools
+
+Git-backed issue tracking with atomic epic creation. Beads are stored as JSONL files in `.beads/issues.jsonl` and synced via git.
+
+### beads_create
+
+Create a new bead with type-safe validation.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `title` | string | ✅ | Bead title |
+| `type` | `"bug" \| "feature" \| "task" \| "epic" \| "chore"` | ❌ | Bead type (default: `"task"`) |
+| `description` | string | ❌ | Detailed description |
+| `priority` | 0-3 | ❌ | Priority (0=urgent, 3=low, default: 2) |
+| `parent_id` | string | ❌ | Parent bead ID for subtasks |
+
+**Example:**
+
+```typescript
+beads_create({
+  title: "Add OAuth authentication",
+  type: "feature",
+  description: "Implement OAuth 2.0 with refresh tokens",
+  priority: 1
+})
+```
+
+**Returns:** `{ id: "bd-123", title: "...", status: "open", ... }`
+
+---
+
+### beads_create_epic
+
+Create an epic with subtasks atomically. Either all beads are created or none (with rollback hints).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `epic_title` | string | ✅ | Epic title |
+| `epic_description` | string | ❌ | Epic description |
+| `subtasks` | array | ✅ | Array of subtask definitions |
+
+**Subtask Schema:**
+
+```typescript
+{
+  title: string;           // Required
+  priority?: 0-3;          // Optional, default: 2
+  files?: string[];        // Optional, files this subtask touches
+}
+```
+
+**Example:**
+
+```typescript
+beads_create_epic({
+  epic_title: "User Authentication",
+  epic_description: "OAuth 2.0 implementation with refresh tokens",
+  subtasks: [
+    { 
+      title: "Create auth schema", 
+      priority: 2,
+      files: ["src/auth/schema.ts"]
+    },
+    { 
+      title: "Implement OAuth flow",
+      priority: 2,
+      files: ["src/auth/oauth.ts", "src/auth/tokens.ts"]
+    },
+    {
+      title: "Add token refresh logic",
+      priority: 1,
+      files: ["src/auth/refresh.ts"]
+    }
+  ]
+})
+```
+
+**Returns:** `{ epic_id: "bd-123", subtask_ids: ["bd-123.1", "bd-123.2", ...] }`
+
+---
+
+### beads_query
+
+Query beads with filters. Replaces legacy `bd list`, `bd ready`, `bd wip` commands.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `status` | `"open" \| "in_progress" \| "blocked" \| "closed"` | ❌ | Filter by status |
+| `type` | `"bug" \| "feature" \| "task" \| "epic" \| "chore"` | ❌ | Filter by type |
+| `ready` | boolean | ❌ | Only unblocked beads |
+| `limit` | number | ❌ | Max results |
+
+**Example:**
+
+```typescript
+// Get all in-progress beads
+beads_query({ status: "in_progress" })
+
+// Get next ready bead
+beads_query({ ready: true, limit: 1 })
+
+// Get all open bugs
+beads_query({ type: "bug", status: "open" })
+```
+
+**Returns:** Array of beads matching filters.
+
+---
+
+### beads_update
+
+Update bead status, description, or priority.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | ✅ | Bead ID (e.g., `"bd-123"`) |
+| `status` | `"open" \| "in_progress" \| "blocked" \| "closed"` | ❌ | New status |
+| `description` | string | ❌ | New description |
+| `priority` | 0-3 | ❌ | New priority |
+
+**Example:**
+
+```typescript
+beads_update({
+  id: "bd-123",
+  status: "blocked",
+  description: "Blocked: waiting for API schema from bd-122"
+})
+```
+
+---
+
+### beads_close
+
+Close a bead with a reason. Prefer this over `beads_update` for closure tracking.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | ✅ | Bead ID |
+| `reason` | string | ✅ | Closure reason |
+
+**Example:**
+
+```typescript
+beads_close({
+  id: "bd-123",
+  reason: "Done: OAuth flow implemented and tested"
+})
+```
+
+---
+
+### beads_start
+
+Mark a bead as in-progress. Sets `status: "in_progress"`.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | ✅ | Bead ID |
+
+**Example:**
+
+```typescript
+beads_start({ id: "bd-123" })
+```
+
+---
+
+### beads_ready
+
+Get the next ready bead (unblocked, highest priority).
+
+**Parameters:** None
+
+**Example:**
+
+```typescript
+beads_ready()
+// Returns: { id: "bd-125", title: "...", priority: 0, ... }
+```
+
+---
+
+### beads_sync
+
+Sync beads to git. **MANDATORY** before ending a session.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `auto_pull` | boolean | ❌ | Pull before push (default: `true`) |
+
+**Example:**
+
+```typescript
+beads_sync()
+// Runs: git add .beads && git commit && git pull && git push
+```
+
+**Critical:** Always call this at session end. Changes not synced are lost.
+
+---
+
+## Swarm Mail Tools
+
+Inter-agent messaging with file reservations. Backed by event sourcing via swarm-mail package.
+
+### swarmmail_init
+
+Initialize Swarm Mail session. **MANDATORY** before using other swarmmail tools.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_path` | string | ✅ | Absolute path to project |
+| `agent_name` | string | ❌ | Custom agent name (auto-generated if omitted) |
+| `task_description` | string | ❌ | Current task description |
+
+**Example:**
+
+```typescript
+swarmmail_init({
+  project_path: "/Users/joel/projects/my-app",
+  task_description: "bd-123.2: Implementing OAuth service"
+})
+// Returns: { agent_name: "BlueLake", project_key: "/Users/joel/projects/my-app" }
+```
+
+**Critical:** Call this FIRST before modifying files in swarm workflows.
+
+---
+
+### swarmmail_send
+
+Send a message to other agents.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `to` | string[] | ✅ | Recipient agent names |
+| `subject` | string | ✅ | Message subject |
+| `body` | string | ✅ | Message body |
+| `thread_id` | string | ❌ | Thread ID (use bead ID for swarm work) |
+| `importance` | `"low" \| "normal" \| "high" \| "urgent"` | ❌ | Message priority (default: `"normal"`) |
+| `ack_required` | boolean | ❌ | Require acknowledgment (default: `false`) |
+
+**Example:**
+
+```typescript
+// Progress update to coordinator
+swarmmail_send({
+  to: ["coordinator"],
+  subject: "Progress: bd-123.2",
+  body: "Schema defined, starting service layer. ETA 20min.",
+  thread_id: "bd-123"
+})
+
+// Blocker notification
+swarmmail_send({
+  to: ["coordinator"],
+  subject: "BLOCKED: bd-123.2 needs database schema",
+  body: "Can't proceed without db migration from bd-123.1",
+  importance: "high",
+  thread_id: "bd-123"
+})
+```
+
+**Returns:** `{ message_id: 42, thread_id: "bd-123", recipient_count: 1 }`
+
+---
+
+### swarmmail_inbox
+
+Fetch inbox messages. **Context-safe:** enforces `limit: 5` max, excludes bodies by default.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `limit` | number | ❌ | Max messages (capped at 5) |
+| `urgent_only` | boolean | ❌ | Only urgent messages |
+
+**Example:**
+
+```typescript
+swarmmail_inbox({ limit: 5 })
+// Returns headers only (no bodies)
+```
+
+**Critical:** Bodies excluded by default to preserve context. Use `swarmmail_read_message` for individual bodies.
+
+---
+
+### swarmmail_read_message
+
+Fetch ONE message body by ID.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message_id` | number | ✅ | Message ID from inbox |
+
+**Example:**
+
+```typescript
+swarmmail_read_message({ message_id: 42 })
+// Returns: { id: 42, subject: "...", body: "...", from: "...", ... }
+```
+
+---
+
+### swarmmail_reserve
+
+Reserve file paths for exclusive editing. Prevents conflicts with other agents.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `paths` | string[] | ✅ | File paths or patterns |
+| `reason` | string | ❌ | Reservation reason (include bead ID) |
+| `exclusive` | boolean | ❌ | Exclusive lock (default: `true`) |
+| `ttl_seconds` | number | ❌ | Lock TTL (default: 3600) |
+
+**Example:**
+
+```typescript
+swarmmail_reserve({
+  paths: ["src/auth/**", "src/lib/jwt.ts"],
+  reason: "bd-123.2: Auth service implementation",
+  ttl_seconds: 3600
+})
+// Returns: { granted: [{ id: 1, path_pattern: "src/auth/**", ... }] }
+```
+
+**Critical:** Reserve BEFORE editing files. Use bead ID in reason for traceability.
+
+---
+
+### swarmmail_release
+
+Release file reservations.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `paths` | string[] | ❌ | Specific paths to release |
+| `reservation_ids` | number[] | ❌ | Specific reservation IDs |
+
+**Example:**
+
+```typescript
+// Release all reservations for current agent
+swarmmail_release()
+
+// Release specific paths
+swarmmail_release({ paths: ["src/auth/**"] })
+```
+
+**Critical:** Auto-released by `swarm_complete`. Manual release only needed if aborting early.
+
+---
+
+## Swarm Tools
+
+Task decomposition, parallel orchestration, and learning systems.
+
+### swarm_init
+
+Initialize swarm session and check tool availability.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_path` | string | ❌ | Project path (defaults to cwd) |
+
+**Example:**
+
+```typescript
+swarm_init({ project_path: "/Users/joel/projects/my-app" })
+// Returns: { beads_available: true, swarmmail_available: true, ... }
+```
+
+---
+
+### swarm_select_strategy
+
+Analyze task and recommend decomposition strategy (file-based, feature-based, risk-based).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `task` | string | ✅ | Task description |
+| `codebase_context` | string | ❌ | Optional codebase context |
+
+**Example:**
+
+```typescript
+swarm_select_strategy({
+  task: "Add OAuth authentication with refresh tokens"
+})
+// Returns: { strategy: "feature-based", rationale: "...", confidence: 0.85 }
+```
+
+---
+
+### swarm_decompose
+
+Generate decomposition prompt with CASS history queries.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `task` | string | ✅ | Task description |
+| `max_subtasks` | number | ❌ | Max subtasks (default: 5) |
+| `query_cass` | boolean | ❌ | Query CASS history (default: `true`) |
+| `context` | string | ❌ | Additional context |
+| `cass_limit` | number | ❌ | CASS result limit (default: 3) |
+
+**Example:**
+
+```typescript
+swarm_decompose({
+  task: "Add OAuth authentication",
+  max_subtasks: 5,
+  query_cass: true
+})
+// Returns prompt string with CASS context
+```
+
+---
+
+### swarm_validate_decomposition
+
+Validate decomposition response against BeadTreeSchema. Detects file conflicts and instruction conflicts.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `response` | string | ✅ | Agent's decomposition response |
+
+**Example:**
+
+```typescript
+swarm_validate_decomposition({
+  response: `{ "epic": {...}, "subtasks": [...] }`
+})
+// Returns: { valid: true, data: {...} } or { valid: false, errors: [...] }
+```
+
+---
+
+### swarm_plan_prompt
+
+Generate strategy-specific decomposition prompt.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `task` | string | ✅ | Task description |
+| `strategy` | `"file-based" \| "feature-based" \| "risk-based" \| "auto"` | ❌ | Strategy (default: `"auto"`) |
+| `max_subtasks` | number | ❌ | Max subtasks (default: 5) |
+| `context` | string | ❌ | Additional context |
+| `query_cass` | boolean | ❌ | Query CASS (default: `true`) |
+| `cass_limit` | number | ❌ | CASS limit (default: 3) |
+
+**Example:**
+
+```typescript
+swarm_plan_prompt({
+  task: "Add OAuth authentication",
+  strategy: "feature-based",
+  max_subtasks: 5
+})
+```
+
+---
+
+### swarm_subtask_prompt
+
+Generate worker agent prompt with bead context and Agent Mail instructions.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent_name` | string | ✅ | Worker agent name |
+| `bead_id` | string | ✅ | Subtask bead ID |
+| `epic_id` | string | ✅ | Epic bead ID |
+| `subtask_title` | string | ✅ | Subtask title |
+| `subtask_description` | string | ❌ | Subtask description |
+| `files` | string[] | ✅ | Files to modify |
+| `shared_context` | string | ❌ | Shared context from epic |
+
+**Example:**
+
+```typescript
+swarm_subtask_prompt({
+  agent_name: "BlueLake",
+  bead_id: "bd-123.2",
+  epic_id: "bd-123",
+  subtask_title: "Implement OAuth flow",
+  files: ["src/auth/oauth.ts", "src/auth/tokens.ts"],
+  shared_context: "Use JWT with 5min refresh buffer"
+})
+// Returns full worker agent prompt
+```
+
+---
+
+### swarm_spawn_subtask
+
+Prepare subtask for spawning with Task tool.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `bead_id` | string | ✅ | Subtask bead ID |
+| `epic_id` | string | ✅ | Epic bead ID |
+| `subtask_title` | string | ✅ | Subtask title |
+| `subtask_description` | string | ❌ | Subtask description |
+| `files` | string[] | ✅ | Files to modify |
+| `shared_context` | string | ❌ | Shared context |
+
+**Example:**
+
+```typescript
+swarm_spawn_subtask({
+  bead_id: "bd-123.2",
+  epic_id: "bd-123",
+  subtask_title: "Implement OAuth flow",
+  files: ["src/auth/oauth.ts"]
+})
+// Returns: { prompt: "...", files: [...] }
+```
+
+---
+
+### swarm_status
+
+Get swarm progress by epic ID.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `epic_id` | string | ✅ | Epic bead ID |
+| `project_key` | string | ✅ | Project path |
+
+**Example:**
+
+```typescript
+swarm_status({
+  epic_id: "bd-123",
+  project_key: "/Users/joel/projects/my-app"
+})
+// Returns: { total: 5, completed: 3, in_progress: 1, blocked: 1 }
+```
+
+---
+
+### swarm_progress
+
+Report progress on a subtask to coordinator.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_key` | string | ✅ | Project path |
+| `agent_name` | string | ✅ | Worker agent name |
+| `bead_id` | string | ✅ | Subtask bead ID |
+| `status` | `"in_progress" \| "blocked" \| "completed" \| "failed"` | ✅ | Status |
+| `message` | string | ❌ | Status message |
+| `progress_percent` | number | ❌ | Progress 0-100 |
+| `files_touched` | string[] | ❌ | Files modified |
+
+**Example:**
+
+```typescript
+swarm_progress({
+  project_key: "/Users/joel/projects/my-app",
+  agent_name: "BlueLake",
+  bead_id: "bd-123.2",
+  status: "in_progress",
+  message: "Schema defined, starting service layer",
+  progress_percent: 40,
+  files_touched: ["src/auth/schema.ts"]
+})
+```
+
+---
+
+### swarm_complete
+
+Complete subtask with automatic release, UBS scan, and learning signals.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_key` | string | ✅ | Project path |
+| `agent_name` | string | ✅ | Worker agent name |
+| `bead_id` | string | ✅ | Subtask bead ID |
+| `summary` | string | ✅ | Completion summary |
+| `files_touched` | string[] | ❌ | Files modified |
+| `evaluation` | string | ❌ | Self-evaluation |
+| `skip_ubs_scan` | boolean | ❌ | Skip UBS scan |
+
+**Example:**
+
+```typescript
+swarm_complete({
+  project_key: "/Users/joel/projects/my-app",
+  agent_name: "BlueLake",
+  bead_id: "bd-123.2",
+  summary: "OAuth flow implemented with JWT strategy",
+  files_touched: ["src/auth/oauth.ts", "src/auth/tokens.ts"],
+  evaluation: "Completed successfully, added unit tests"
+})
+// Auto-releases reservations, runs UBS scan, records learning signals
+```
+
+**Critical:** Use this instead of manual `beads_close`. Handles cleanup and learning.
+
+---
+
+### swarm_record_outcome
+
+Record subtask outcome for learning (duration, errors, retries).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `bead_id` | string | ✅ | Subtask bead ID |
+| `duration_ms` | number | ✅ | Duration in milliseconds |
+| `success` | boolean | ✅ | Whether subtask succeeded |
+| `error_count` | number | ❌ | Number of errors |
+| `retry_count` | number | ❌ | Number of retries |
+| `files_touched` | string[] | ❌ | Files modified |
+| `strategy` | `"file-based" \| "feature-based" \| "risk-based"` | ❌ | Strategy used |
+| `criteria` | string[] | ❌ | Evaluation criteria |
+
+**Example:**
+
+```typescript
+swarm_record_outcome({
+  bead_id: "bd-123.2",
+  duration_ms: 1200000, // 20 minutes
+  success: true,
+  error_count: 0,
+  retry_count: 0,
+  files_touched: ["src/auth/oauth.ts"],
+  strategy: "feature-based"
+})
+```
+
+---
+
+### swarm_evaluation_prompt
+
+Generate self-evaluation prompt for a completed subtask.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `bead_id` | string | ✅ | Subtask bead ID |
+| `subtask_title` | string | ✅ | Subtask title |
+| `files_touched` | string[] | ✅ | Files modified |
+
+**Example:**
+
+```typescript
+swarm_evaluation_prompt({
+  bead_id: "bd-123.2",
+  subtask_title: "Implement OAuth flow",
+  files_touched: ["src/auth/oauth.ts"]
+})
+// Returns prompt asking agent to self-evaluate
+```
+
+---
+
+## Skills Tools
+
+Knowledge injection system with bundled and custom skills.
+
+### skills_list
+
+List available skills from global, project, and bundled sources.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `source` | `"all" \| "global" \| "project" \| "bundled"` | ❌ | Filter by source |
+
+**Example:**
+
+```typescript
+skills_list()
+// Returns: [{ name: "testing-patterns", description: "...", hasScripts: false }, ...]
+```
+
+---
+
+### skills_use
+
+Load skill content into agent context with optional task context.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | ✅ | Skill name |
+| `context` | string | ❌ | Task context |
+
+**Example:**
+
+```typescript
+skills_use({
+  name: "testing-patterns",
+  context: "Need to break dependencies in legacy auth module"
+})
+// Returns formatted skill content with SKILL.md + references
+```
+
+---
+
+### skills_read
+
+Read full skill content including SKILL.md and references.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | ✅ | Skill name |
+
+**Example:**
+
+```typescript
+skills_read({ name: "swarm-coordination" })
+// Returns: { metadata: {...}, body: "...", references: [...] }
+```
+
+---
+
+### skills_create
+
+Create a new skill with SKILL.md template.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | ✅ | Skill name (lowercase, hyphens) |
+| `description` | string | ✅ | What the skill does |
+| `scope` | `"global" \| "project"` | ❌ | Skill scope (default: `"project"`) |
+| `tags` | string[] | ❌ | Tags for categorization |
+
+**Example:**
+
+```typescript
+skills_create({
+  name: "api-design",
+  description: "REST API design patterns and best practices",
+  scope: "global",
+  tags: ["architecture", "api", "rest"]
+})
+```
+
+---
+
+## Bundled Skills
+
+Located in `global-skills/`, shipped with the plugin:
+
+| Skill | Purpose |
+|-------|---------|
+| **testing-patterns** | 25 dependency-breaking techniques, characterization tests (Feathers patterns) |
+| **swarm-coordination** | Multi-agent decomposition, file reservations, coordination patterns |
+| **cli-builder** | Argument parsing, help text, subcommands, clack/commander patterns |
+| **system-design** | Architecture decisions, module boundaries, API design |
+| **learning-systems** | Confidence decay, pattern maturity, feedback loops |
+| **skill-creator** | Meta-skill for creating new skills |
+
+**Pro tip:** The `testing-patterns` skill has a full dependency-breaking catalog with 25 techniques in `references/dependency-breaking-catalog.md`.
+
+---
+
+## Workflow Examples
+
+### Swarm Workflow (Complete)
+
+```typescript
+// 1. Initialize swarm
+swarm_init({ project_path: "/my/project" })
+
+// 2. Decompose task
+const prompt = swarm_decompose({
+  task: "Add OAuth authentication",
+  max_subtasks: 5,
+  query_cass: true
+})
+
+// Agent responds with BeadTree JSON
+
+// 3. Validate decomposition
+const validation = swarm_validate_decomposition({
+  response: agentResponse
+})
+
+// 4. Create epic + subtasks
+beads_create_epic({
+  epic_title: "User Authentication",
+  subtasks: validation.data.subtasks
+})
+
+// 5. Each worker agent:
+swarmmail_init({ project_path: "/my/project" })
+swarmmail_reserve({
+  paths: ["src/auth/**"],
+  reason: "bd-123.2: Auth service"
+})
+// ... do work ...
+swarm_complete({
+  project_key: "/my/project",
+  agent_name: "BlueLake",
+  bead_id: "bd-123.2",
+  summary: "OAuth flow implemented",
+  files_touched: ["src/auth/oauth.ts"]
+})
+```
+
+### Beads Session Workflow
+
+```typescript
+// Session start
+beads_ready()                    // What's next?
+beads_query({ status: "in_progress" })  // What's mid-flight?
+
+// Start work
+beads_start({ id: "bd-123" })
+
+// Update status
+beads_update({
+  id: "bd-123",
+  description: "Updated scope to include refresh tokens"
+})
+
+// Complete
+beads_close({
+  id: "bd-123",
+  reason: "Done: OAuth implemented with refresh"
+})
+
+// Session end (MANDATORY)
+beads_sync()
+```
+
+### Skills Workflow
+
+```typescript
+// List available
+skills_list()
+
+// Load skill for current task
+skills_use({
+  name: "testing-patterns",
+  context: "Breaking dependencies in AuthService"
+})
+
+// Read full content
+skills_read({ name: "testing-patterns" })
+```
+
+---
+
+## Next Steps
+
+- [Swarm Mail Architecture](/docs/swarm-mail) - Event sourcing, projections, durable primitives
+- [Roadmap](/docs/roadmap) - Future plans and experimental features

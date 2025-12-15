@@ -1,70 +1,208 @@
 ---
-title: Getting Started
-description: Framework-agnostic primitives for agentic systems
+title: Swarm Tools Documentation
+description: Framework-agnostic primitives for multi-agent AI systems
 ---
 
-# Swarm Tools
+# Swarm Tools Documentation
 
-Framework-agnostic primitives for building agentic systems. Works with any AI agent - Claude, GPT, Gemini, or your own.
+Framework-agnostic primitives for building multi-agent AI systems. Works with Claude, GPT, Gemini, or any AI agent framework.
 
-## What's Inside
+## What Swarm Tools Provides
 
-| Package | Purpose |
-|---------|---------|
-| `@swarmtools/data` | Database adapters, migrations, PGLite |
-| `@swarmtools/mail` | Event sourcing, actor-model messaging |
-| `@swarmtools/vector` | Embeddings, vector storage |
-| `@swarmtools/learning` | Confidence decay, pattern maturity |
-| `@swarmtools/skills` | Knowledge injection, SKILL.md format |
-| `@swarmtools/structured` | Schema validation, JSON extraction |
-| `@swarmtools/guardrails` | Rate limiting, output guards |
+Swarm Tools delivers production-ready primitives for agent coordination, task decomposition, and learning systems.
+
+**Core packages:**
+- **swarm-mail** - Event sourcing and actor-model messaging for agent coordination
+- **opencode-swarm-plugin** - OpenCode plugin with swarm orchestration, beads integration, and learning capabilities
+
+**Key capabilities:**
+- Event-sourced coordination with PGLite (no external servers)
+- Parallel task decomposition with conflict detection
+- File reservation system for safe concurrent edits
+- Pattern maturity tracking and anti-pattern detection
+- Skills system for knowledge injection
 
 ## Quick Start
 
-```bash
-# Install the package you need
-bun add @swarmtools/mail
+Install the OpenCode plugin (includes all packages):
 
-# Or install the OpenCode plugin (includes all packages)
-bun add @swarmtools/opencode
+```bash
+npm install -g opencode-swarm-plugin@latest
+swarm setup
+```
+
+Or use swarm-mail standalone:
+
+```bash
+bun add swarm-mail
+```
+
+## OpenCode Plugin Tools
+
+The plugin provides 40+ tools organized into four categories:
+
+| Category | Tools | Purpose |
+|----------|-------|---------|
+| **Beads** | 8 tools | Git-backed issue tracking with atomic epic creation |
+| **Swarm Mail** | 6 tools | Inter-agent messaging with file reservations |
+| **Swarm** | 20+ tools | Task decomposition, parallel orchestration, learning |
+| **Skills** | 4 tools | Knowledge injection with bundled domain expertise |
+
+[View all OpenCode plugin tools →](/docs/opencode-plugin)
+
+## Swarm Mail Primitives
+
+Event sourcing and actor-model primitives for agent coordination:
+
+| Primitive | Purpose |
+|-----------|---------|
+| **EventStore** | Append-only event log with automatic projections |
+| **Projections** | Materialized views (agents, messages, reservations) |
+| **DurableMailbox** | Actor inbox with typed message envelopes |
+| **DurableLock** | Compare-and-swap based mutual exclusion |
+| **DurableCursor** | Checkpointed stream reader for resumability |
+| **DurableDeferred** | Distributed promise for async coordination |
+
+[View swarm-mail architecture →](/docs/swarm-mail)
+
+## Example: Event Sourcing
+
+```typescript
+import { getSwarmMail } from 'swarm-mail';
+
+// Get swarm mail instance (PGLite adapter)
+const swarmMail = await getSwarmMail('/my/project');
+
+// Append events
+await swarmMail.appendEvent({
+  type: 'agent_registered',
+  agent_name: 'WorkerA',
+  task_description: 'Implementing auth service',
+  timestamp: Date.now(),
+});
+
+// Query projections
+const agents = await swarmMail.getAgents();
+const messages = await swarmMail.getInbox('WorkerA', { limit: 5 });
+```
+
+## Example: Swarm Coordination
+
+```typescript
+// In OpenCode, use the /swarm command:
+/swarm "Add user authentication with OAuth"
+
+// The plugin:
+// 1. Queries CASS for similar past decompositions
+// 2. Generates a strategy-specific decomposition
+// 3. Creates epic + subtasks atomically
+// 4. Spawns parallel worker agents
+// 5. Tracks progress via Agent Mail
+// 6. Records learning signals for future improvements
+```
+
+## Example: File Reservations
+
+```typescript
+import { reserveSwarmFiles, releaseSwarmFiles } from 'swarm-mail';
+
+// Reserve files before editing (prevents conflicts)
+await reserveSwarmFiles(
+  'WorkerA',
+  ['src/auth/**', 'src/lib/jwt.ts'],
+  { reason: 'bd-123.2: Auth service implementation' }
+);
+
+// Do work...
+
+// Release when done
+await releaseSwarmFiles('WorkerA');
+```
+
+## Example: Durable Primitives (Effect-TS)
+
+```typescript
+import { DurableMailbox, DurableLock, ask } from 'swarm-mail';
+import { Effect } from 'effect';
+
+// Actor mailbox
+const mailbox = DurableMailbox.create<MyMessage>('worker-a');
+await Effect.runPromise(
+  mailbox.send({ type: 'task', payload: 'implement feature' })
+);
+
+// File locking with automatic release
+const lock = DurableLock.create('src/auth.ts');
+await Effect.runPromise(
+  lock.acquire({ ttl: 60000 }).pipe(
+    Effect.flatMap(() => /* do work */),
+    Effect.ensuring(lock.release())
+  )
+);
+
+// Request/response pattern
+const response = await Effect.runPromise(
+  ask<Request, Response>('other-agent', { type: 'get-types' })
+);
 ```
 
 ## Philosophy
 
-**Primitives, not frameworks.** Each package solves one problem well:
+**Primitives, not frameworks.** Each package solves one problem well.
 
 - **Composable** - Mix and match what you need
 - **Zero lock-in** - Works with any agent framework
 - **Type-safe** - Full TypeScript with Zod schemas
+- **Local-first** - PGLite embedded database, no external servers
 - **Fast** - Bun-native, minimal dependencies
 
-## Example: Event Sourcing with Mail
+## Architecture
 
-```typescript
-import { EventStore, createPGLiteAdapter } from '@swarmtools/mail';
-
-// Create an event store
-const adapter = await createPGLiteAdapter('./data');
-const store = new EventStore(adapter);
-
-// Append events
-await store.append('agent-1', {
-  type: 'task.started',
-  payload: { taskId: 'bd-123', title: 'Fix the bug' }
-});
-
-// Project current state
-const state = await store.project('agent-1', (events) => {
-  return events.reduce((acc, e) => {
-    if (e.type === 'task.started') acc.currentTask = e.payload;
-    if (e.type === 'task.completed') acc.currentTask = null;
-    return acc;
-  }, { currentTask: null });
-});
 ```
+┌─────────────────────────────────────────────────────────────┐
+│                     SWARM TOOLS STACK                       │
+├─────────────────────────────────────────────────────────────┤
+│  TIER 3: ORCHESTRATION                                      │
+│  └── OpenCode Plugin (beads, swarm, skills, learning)      │
+│                                                             │
+│  TIER 2: COORDINATION                                       │
+│  ├── DurableMailbox - Actor inbox with typed envelopes     │
+│  ├── DurableLock - CAS-based mutual exclusion              │
+│  └── ask<Req, Res>() - Request/Response (RPC-style)        │
+│                                                             │
+│  TIER 1: PRIMITIVES                                         │
+│  ├── DurableCursor - Checkpointed stream reader            │
+│  └── DurableDeferred - Distributed promise                 │
+│                                                             │
+│  STORAGE                                                    │
+│  └── PGLite (Embedded Postgres) + Event Sourcing           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Use Cases
+
+**Multi-agent task decomposition** - Break complex tasks into parallel subtasks with automatic conflict detection and file reservations.
+
+**Event-sourced agent coordination** - Full audit trail of agent interactions with ability to replay, debug, and recover from any point.
+
+**Learning systems** - Track pattern maturity, detect anti-patterns, and improve decomposition strategies over time.
+
+**Knowledge injection** - Load domain-specific skills into agent context when relevant work is detected.
+
+**Safe concurrent editing** - Prevent edit conflicts with file reservation system and exclusive locks.
 
 ## Next Steps
 
-- [Installation](/docs/installation) - Detailed setup guide
-- [Concepts](/docs/concepts) - Core ideas behind Swarm Tools
-- [Packages](/docs/packages) - Deep dive into each package
+- [OpenCode Plugin Reference](/docs/opencode-plugin) - All beads, swarm mail, swarm, and skills tools
+- [Swarm Mail Architecture](/docs/swarm-mail) - Event sourcing, projections, durable primitives
+- [Roadmap](/docs/roadmap) - Future plans and experimental features
+
+## Community
+
+- **Website:** [swarmtools.ai](https://swarmtools.ai)
+- **GitHub:** [joelhooks/opencode-swarm-plugin](https://github.com/joelhooks/opencode-swarm-plugin)
+- **npm:** [opencode-swarm-plugin](https://www.npmjs.com/package/opencode-swarm-plugin), [swarm-mail](https://www.npmjs.com/package/swarm-mail)
+
+## License
+
+MIT - Use freely in commercial and open-source projects.

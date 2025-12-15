@@ -1,4 +1,9 @@
 {
   "title": "Documentation",
-  "pages": ["index"]
+  "pages": [
+    "index",
+    "opencode-plugin",
+    "swarm-mail",
+    "roadmap"
+  ]
 }

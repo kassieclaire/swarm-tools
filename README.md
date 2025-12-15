@@ -1,6 +1,8 @@
 # opencode-swarm-plugin
 
 [![npm version](https://img.shields.io/npm/v/opencode-swarm-plugin.svg)](https://www.npmjs.com/package/opencode-swarm-plugin)
+[![Documentation](https://img.shields.io/badge/docs-swarmtools.ai-blue)](https://swarmtools.ai/docs)
+[![Website](https://img.shields.io/badge/website-swarmtools.ai-orange)](https://swarmtools.ai)
 
 ```
  ███████╗██╗    ██╗ █████╗ ██████╗ ███╗   ███╗
@@ -17,6 +19,10 @@
     (_|   |_)        Learn from what works.
       bzzzz...
 ```
+
+> **[🐝 swarmtools.ai](https://swarmtools.ai)** | **[📚 Documentation](https://swarmtools.ai/docs)**
+>
+> **Swarm Tools** - Multi-agent coordination for AI coding. This monorepo contains the core packages that power parallel task decomposition, actor-model messaging, and learning systems.
 
 ## The Problem
 

@@ -30,6 +30,8 @@
 
 Event sourcing primitives for multi-agent coordination. Local-first, no external servers.
 
+**[🌐 swarmtools.ai](https://swarmtools.ai)** | **[📖 Full Documentation](https://swarmtools.ai/docs)**
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     SWARM MAIL STACK                        │
@@ -189,6 +191,8 @@ Materialized views derived from events:
 - **Exactly-once** - DurableCursor checkpoints position
 
 ## API Reference
+
+For complete API documentation, see [swarmtools.ai/docs](https://swarmtools.ai/docs).
 
 ### SwarmMailAdapter
 

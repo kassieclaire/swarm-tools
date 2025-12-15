@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Github } from 'lucide-react';
+import { Github, BookOpen } from 'lucide-react';
 
 /**
  * Home page for Swarm Tools - framework-agnostic primitives for agentic systems.
@@ -14,8 +14,8 @@ import { Github } from 'lucide-react';
  */
 
 export const metadata: Metadata = {
-	title: 'Swarm Tools - framework-agnostic primitives for agentic systems',
-	description: 'Event sourcing, multi-agent coordination, and durable execution patterns for AI coding assistants. Open source TypeScript libraries for building reliable agentic systems.',
+	title: 'Swarm Tools - Multi-Agent Coordination Primitives',
+	description: 'Event sourcing, multi-agent coordination, and durable execution patterns for AI coding assistants. TypeScript primitives.',
 	alternates: {
 		canonical: 'https://swarmtools.ai',
 	},
@@ -181,7 +181,7 @@ export default function Home() {
 					</p>
 
 					{/* CTA - Clear action */}
-					<div className="mt-10">
+					<div className="mt-10 flex flex-wrap gap-4 justify-center items-center">
 						<a
 							href="https://github.com/joelhooks/opencode-swarm-plugin"
 							target="_blank"
@@ -191,6 +191,14 @@ export default function Home() {
 							<Github className="relative z-10 w-5 h-5" />
 							<span className="relative z-10">View on GitHub</span>
 							<div className="absolute inset-0 bg-gradient-to-r from-amber-400 to-orange-500 opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true" />
+						</a>
+						<a
+							href="/docs"
+							className="group relative px-8 py-3 bg-neutral-800 text-amber-500 font-semibold rounded-lg border-2 border-amber-500/30 overflow-hidden transition-all hover:border-amber-500 hover:scale-105 inline-flex items-center gap-2"
+						>
+							<BookOpen className="relative z-10 w-5 h-5" />
+							<span className="relative z-10">Read Docs</span>
+							<div className="absolute inset-0 bg-gradient-to-r from-amber-500/10 to-orange-500/10 opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true" />
 						</a>
 					</div>
 				</article>
