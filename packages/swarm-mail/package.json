@@ -17,8 +17,9 @@
     "publish:pkg": "npm publish --access public --provenance"
   },
   "dependencies": {
-    "effect": "^3.19.12",
     "@electric-sql/pglite": "0.3.14",
+    "effect": "^3.19.12",
+    "minimatch": "^10.1.1",
     "zod": "4.1.8"
   },
   "devDependencies": {
