@@ -44,6 +44,10 @@ import {
   DEFAULT_GUARDRAIL_CONFIG,
   type GuardrailResult,
 } from "./output-guardrails";
+import {
+  analyzeTodoWrite,
+  shouldAnalyzeTool,
+} from "./planning-guardrails";
 
 /**
  * OpenCode Swarm Plugin
@@ -161,6 +165,24 @@ export const SwarmPlugin: Plugin = async (
       // Auto-release reservations on session idle
       if (event.type === "session.idle") {
         await releaseReservations();
+      }
+    },
+
+    /**
+     * Hook before tool execution for planning guardrails
+     *
+     * Warns when agents are about to make planning mistakes:
+     * - Using todowrite for multi-file implementation (should use swarm)
+     */
+    "tool.execute.before": async (input, output) => {
+      const toolName = input.tool;
+
+      // Check for planning anti-patterns
+      if (shouldAnalyzeTool(toolName)) {
+        const analysis = analyzeTodoWrite(output.args);
+        if (analysis.warning) {
+          console.warn(`[swarm-plugin] ${analysis.warning}`);
+        }
       }
     },
 

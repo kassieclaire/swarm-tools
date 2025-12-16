@@ -1189,29 +1189,49 @@ Continuing with completion, but this should be fixed for future subtasks.`;
         }
       }
 
-      // Close the bead
+      // Close the bead - use project_key as working directory to find correct .beads/
+      // This fixes the issue where bead ID prefix (e.g., "pdf-library-g84.2") doesn't match CWD
       const closeResult =
         await Bun.$`bd close ${args.bead_id} --reason ${args.summary} --json`
+          .cwd(args.project_key)
           .quiet()
           .nothrow();
 
       if (closeResult.exitCode !== 0) {
         const stderrOutput = closeResult.stderr.toString().trim();
+        const stdoutOutput = closeResult.stdout.toString().trim();
+
+        // Check for common error patterns and provide better guidance
+        const isNoDatabaseError = stderrOutput.includes("no beads database found");
+        const isNotFoundError = stderrOutput.includes("not found") || stderrOutput.includes("does not exist");
+
         return JSON.stringify(
           {
             success: false,
             error: "Failed to close bead",
             failed_step: "bd close",
-            details: stderrOutput || "Unknown error from bd close command",
+            details: stderrOutput || stdoutOutput || "Unknown error from bd close command",
             bead_id: args.bead_id,
+            project_key: args.project_key,
             recovery: {
-              steps: [
-                `1. Check bead exists: bd show ${args.bead_id}`,
-                `2. Check bead status (might already be closed): beads_query()`,
-                `3. If bead is blocked, unblock first: beads_update(id="${args.bead_id}", status="in_progress")`,
-                `4. Try closing directly: beads_close(id="${args.bead_id}", reason="...")`,
-              ],
-              hint: "If bead is in 'blocked' status, you must change it to 'in_progress' or 'open' before closing.",
+              steps: isNoDatabaseError
+                ? [
+                    `1. Verify project_key is correct: "${args.project_key}"`,
+                    `2. Check .beads/ exists in that directory`,
+                    `3. Bead ID prefix "${args.bead_id.split("-")[0]}" should match project`,
+                    `4. Try: beads_close(id="${args.bead_id}", reason="...")`,
+                  ]
+                : [
+                    `1. Check bead exists: bd show ${args.bead_id}`,
+                    `2. Check bead status (might already be closed): beads_query()`,
+                    `3. If bead is blocked, unblock first: beads_update(id="${args.bead_id}", status="in_progress")`,
+                    `4. Try closing directly: beads_close(id="${args.bead_id}", reason="...")`,
+                  ],
+              hint: isNoDatabaseError
+                ? `The project_key "${args.project_key}" doesn't have a .beads/ directory. Make sure you're using the correct project path.`
+                : isNotFoundError
+                  ? `Bead "${args.bead_id}" not found. It may have been closed already or the ID is incorrect.`
+                  : "If bead is in 'blocked' status, you must change it to 'in_progress' or 'open' before closing.",
             },
           },
           null,
