@@ -883,7 +883,7 @@ const SWARM_COMMAND = `---
 description: Decompose task into parallel subtasks and coordinate agents
 ---
 
-You are a swarm coordinator. Decompose the task into beads and spawn parallel agents.
+You are a swarm coordinator. Your job is to clarify the task, decompose it into beads, and spawn parallel agents.
 
 ## Task
 
@@ -891,42 +891,84 @@ $ARGUMENTS
 
 ## Workflow
 
-### 1. Initialize
+### Phase 0: Socratic Planning (INTERACTIVE - unless --fast)
+
+**Before decomposing, clarify the task with the user.**
+
+Check for flags in the task:
+- \`--fast\` → Skip questions, use reasonable defaults
+- \`--auto\` → Zero interaction, heuristic decisions
+- \`--confirm-only\` → Show plan, get yes/no only
+
+**Default (no flags): Full Socratic Mode**
+
+1. **Analyze task for ambiguity:**
+   - Scope unclear? (what's included/excluded)
+   - Strategy unclear? (file-based vs feature-based)
+   - Dependencies unclear? (what needs to exist first)
+   - Success criteria unclear? (how do we know it's done)
+
+2. **If clarification needed, ask ONE question at a time:**
+   \`\`\`
+   The task "<task>" needs clarification before I can decompose it.
+
+   **Question:** <specific question>
+
+   Options:
+   a) <option 1> - <tradeoff>
+   b) <option 2> - <tradeoff>
+   c) <option 3> - <tradeoff>
+
+   I'd recommend (b) because <reason>. Which approach?
+   \`\`\`
+
+3. **Wait for user response before proceeding**
+
+4. **Iterate if needed** (max 2-3 questions)
+
+**Rules:**
+- ONE question at a time - don't overwhelm
+- Offer concrete options - not open-ended
+- Lead with recommendation - save cognitive load
+- Wait for answer - don't assume
+
+### Phase 1: Initialize
 \`swarmmail_init(project_path="$PWD", task_description="Swarm: <task>")\`
 
-### 2. Knowledge Gathering (MANDATORY)
+### Phase 2: Knowledge Gathering (MANDATORY)
 
 **Before decomposing, query ALL knowledge sources:**
 
 \`\`\`
 semantic-memory_find(query="<task keywords>", limit=5)   # Past learnings
 cass_search(query="<task description>", limit=5)         # Similar past tasks  
-pdf-brain_search(query="<domain concepts>", limit=5)     # Design patterns
 skills_list()                                            # Available skills
 \`\`\`
 
 Synthesize findings into shared_context for workers.
 
-### 3. Decompose
+### Phase 3: Decompose
 \`\`\`
 swarm_select_strategy(task="<task>")
 swarm_plan_prompt(task="<task>", context="<synthesized knowledge>")
 swarm_validate_decomposition(response="<BeadTree JSON>")
 \`\`\`
 
-### 4. Create Beads
+### Phase 4: Create Beads
 \`beads_create_epic(epic_title="<task>", subtasks=[...])\`
 
-### 5. Reserve Files
+### Phase 5: Reserve Files
 \`swarmmail_reserve(paths=[...], reason="<bead-id>: <desc>")\`
 
-### 6. Spawn Agents (ALL in single message)
+### Phase 6: Spawn Agents (ALL in single message)
 \`\`\`
-swarm_spawn_subtask(bead_id, epic_id, subtask_title, files, shared_context)
+swarm_spawn_subtask(bead_id, epic_id, subtask_title, files, shared_context, project_path="$PWD")
 Task(subagent_type="swarm/worker", prompt="<from above>")
 \`\`\`
 
-### 7. Monitor
+**IMPORTANT:** Pass \`project_path\` to \`swarm_spawn_subtask\` so workers can call \`swarmmail_init\`.
+
+### Phase 7: Monitor
 \`\`\`
 swarm_status(epic_id, project_key)
 swarmmail_inbox()
@@ -934,7 +976,7 @@ swarmmail_inbox()
 
 Intervene if: blocked >5min, file conflicts, scope creep.
 
-### 8. Complete
+### Phase 8: Complete
 \`\`\`
 swarm_complete(...)
 beads_sync()
@@ -949,7 +991,15 @@ beads_sync()
 | risk-based     | Bug fixes, security      | fix, bug, security, critical, urgent   |
 | research-based | Investigation, discovery | research, investigate, explore, learn  |
 
-Begin with knowledge gathering now.
+## Flag Reference
+
+| Flag | Effect |
+|------|--------|
+| \`--fast\` | Skip Socratic questions, use defaults |
+| \`--auto\` | Zero interaction, heuristic decisions |
+| \`--confirm-only\` | Show plan, get yes/no only |
+
+Begin with Phase 0 (Socratic Planning) unless \`--fast\` or \`--auto\` flag is present.
 `;
 
 const getPlannerAgent = (model: string) => `---
@@ -1017,47 +1067,61 @@ description: Executes subtasks in a swarm - fast, focused, cost-effective
 model: ${model}
 ---
 
-You are a swarm worker agent. Execute your assigned subtask efficiently.
+You are a swarm worker agent. Your prompt contains a **MANDATORY SURVIVAL CHECKLIST** - follow it IN ORDER.
 
-## Context
+## CRITICAL: Read Your Prompt Carefully
 
-Your prompt includes shared_context from the coordinator's knowledge gathering:
-- Relevant patterns from pdf-brain
-- Similar past approaches from CASS
-- Project-specific learnings from semantic-memory
+Your Task prompt contains detailed instructions including:
+- 9-step survival checklist (FOLLOW IN ORDER)
+- File reservations (YOU reserve, not coordinator)
+- Progress reporting requirements
+- Completion protocol
 
-**Use this context** - it contains patterns and prior art relevant to your task.
+**DO NOT skip steps.** The checklist exists because skipping steps causes:
+- Lost work (no tracking)
+- Edit conflicts (no reservations)
+- Wasted time (no semantic memory query)
+- Silent failures (no progress reports)
 
-## Workflow
+## Step Summary (details in your prompt)
 
-1. **Read** assigned files to understand current state
-2. **Check skills** if you need domain guidance: \`skills_use(name="<relevant-skill>")\`
-3. **Implement** changes following patterns from shared_context
-4. **Verify** (typecheck, lint if applicable)
-5. **Complete** with \`swarm_complete\`
+1. **swarmmail_init()** - FIRST, before anything else
+2. **semantic-memory_find()** - Check past learnings
+3. **skills_list() / skills_use()** - Load relevant skills
+4. **swarmmail_reserve()** - YOU reserve your files
+5. **Do the work** - Read, implement, verify
+6. **swarm_progress()** - Report at 25/50/75%
+7. **swarm_checkpoint()** - Before risky operations
+8. **semantic-memory_store()** - Store learnings
+9. **swarm_complete()** - NOT beads_close
 
-## Rules
+## Non-Negotiables
 
-- Focus ONLY on your assigned files
-- Report blockers immediately via Swarm Mail (don't spin)
-- Use beads_update if blocked
-- Call swarm_complete when done - it handles bead closure and file release
+- **Step 1 is MANDATORY** - swarm_complete fails without init
+- **Step 2 saves time** - past agents may have solved this
+- **Step 4 prevents conflicts** - workers reserve, not coordinator
+- **Step 6 prevents silent failure** - report progress
+- **Step 9 is the ONLY way to close** - releases reservations, records learning
 
-## Communication
+## When Blocked
 
 \`\`\`
 swarmmail_send(
   to=["coordinator"],
-  subject="Progress/Blocker",
-  body="...",
-  thread_id="<epic_id>"
+  subject="BLOCKED: <bead-id>",
+  body="<what you need>",
+  importance="high"
 )
+beads_update(id="<bead-id>", status="blocked")
 \`\`\`
 
-## Learning
+## Focus
 
-If you discover a reusable pattern worth preserving:
-\`semantic-memory_store(information="<pattern + why it matters>")\`
+- Only modify your assigned files
+- Don't fix other agents' code - coordinate instead
+- Report scope changes before expanding
+
+Begin by reading your full prompt and executing Step 1.
 `;
 
 // ============================================================================
@@ -1238,14 +1302,20 @@ async function setup() {
 
   const pluginPath = join(pluginDir, "swarm.ts");
   const commandPath = join(commandDir, "swarm.md");
-  const plannerAgentPath = join(agentDir, "swarm-planner.md");
-  const workerAgentPath = join(agentDir, "swarm-worker.md");
+  const swarmAgentDir = join(agentDir, "swarm");
+  const plannerAgentPath = join(swarmAgentDir, "planner.md");
+  const workerAgentPath = join(swarmAgentDir, "worker.md");
+  // Legacy flat paths (for detection/cleanup)
+  const legacyPlannerPath = join(agentDir, "swarm-planner.md");
+  const legacyWorkerPath = join(agentDir, "swarm-worker.md");
 
   const existingFiles = [
     pluginPath,
     commandPath,
     plannerAgentPath,
     workerAgentPath,
+    legacyPlannerPath,
+    legacyWorkerPath,
   ].filter((f) => existsSync(f));
 
   if (existingFiles.length > 0) {
@@ -1302,25 +1372,34 @@ async function setup() {
         process.exit(0);
       }
 
-      // Update model lines in agent files
-      if (existsSync(plannerAgentPath)) {
-        const content = readFileSync(plannerAgentPath, "utf-8");
+      // Update model lines in agent files (check both nested and legacy paths)
+      const plannerPaths = [plannerAgentPath, legacyPlannerPath].filter(existsSync);
+      const workerPaths = [workerAgentPath, legacyWorkerPath].filter(existsSync);
+
+      for (const path of plannerPaths) {
+        const content = readFileSync(path, "utf-8");
         const updated = content.replace(
           /^model: .+$/m,
           `model: ${coordinatorModel}`,
         );
-        writeFileSync(plannerAgentPath, updated);
+        writeFileSync(path, updated);
+      }
+      if (plannerPaths.length > 0) {
         p.log.success("Planner: " + coordinatorModel);
       }
-      if (existsSync(workerAgentPath)) {
-        const content = readFileSync(workerAgentPath, "utf-8");
+
+      for (const path of workerPaths) {
+        const content = readFileSync(path, "utf-8");
         const updated = content.replace(
           /^model: .+$/m,
           `model: ${workerModel}`,
         );
-        writeFileSync(workerAgentPath, updated);
+        writeFileSync(path, updated);
+      }
+      if (workerPaths.length > 0) {
         p.log.success("Worker: " + workerModel);
       }
+
       p.outro("Models updated! Your customizations are preserved.");
       return;
     }
@@ -1556,7 +1635,7 @@ async function setup() {
 
   // Create directories if needed
   const skillsDir = join(configDir, "skills");
-  for (const dir of [pluginDir, commandDir, agentDir, skillsDir]) {
+  for (const dir of [pluginDir, commandDir, agentDir, swarmAgentDir, skillsDir]) {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
@@ -1568,11 +1647,23 @@ async function setup() {
   writeFileSync(commandPath, SWARM_COMMAND);
   p.log.success("Command: " + commandPath);
 
+  // Write nested agent files (swarm/planner.md, swarm/worker.md)
+  // This is the format used by Task(subagent_type="swarm/worker")
   writeFileSync(plannerAgentPath, getPlannerAgent(coordinatorModel as string));
   p.log.success("Planner agent: " + plannerAgentPath);
 
   writeFileSync(workerAgentPath, getWorkerAgent(workerModel as string));
   p.log.success("Worker agent: " + workerAgentPath);
+
+  // Clean up legacy flat agent files if they exist
+  if (existsSync(legacyPlannerPath)) {
+    rmSync(legacyPlannerPath);
+    p.log.message(dim("  Removed legacy: " + legacyPlannerPath));
+  }
+  if (existsSync(legacyWorkerPath)) {
+    rmSync(legacyWorkerPath);
+    p.log.message(dim("  Removed legacy: " + legacyWorkerPath));
+  }
 
   p.log.success("Skills directory: " + skillsDir);
 
