@@ -995,10 +995,14 @@ Use this to refine skills based on experience:
       .max(1024)
       .optional()
       .describe("New description (replaces existing)"),
+    content: tool.schema
+      .string()
+      .optional()
+      .describe("New content/body (replaces existing SKILL.md body)"),
     body: tool.schema
       .string()
       .optional()
-      .describe("New body content (replaces existing)"),
+      .describe("Alias for content - new body (replaces existing)"),
     append_body: tool.schema
       .string()
       .optional()
@@ -1027,10 +1031,11 @@ Use this to refine skills based on experience:
     // Build updated metadata
     const newDescription = args.description ?? skill.metadata.description;
 
-    // Handle body updates
+    // Handle body updates (content is preferred, body is alias for backwards compat)
     let newBody = skill.body;
-    if (args.body) {
-      newBody = args.body;
+    const bodyContent = args.content ?? args.body;
+    if (bodyContent) {
+      newBody = bodyContent;
     } else if (args.append_body) {
       newBody = `${skill.body}\n\n${args.append_body}`;
     }
@@ -1067,7 +1072,7 @@ Use this to refine skills based on experience:
           path: skill.path,
           updated: {
             description: args.description ? true : false,
-            body: args.body || args.append_body ? true : false,
+            content: args.content || args.body || args.append_body ? true : false,
             tags: args.tags || args.add_tags ? true : false,
             tools: args.tools ? true : false,
           },
