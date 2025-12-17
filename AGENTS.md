@@ -1,5 +1,31 @@
 # Monorepo Guide: Bun + Turborepo
 
+## CRITICAL: No `bd` CLI Commands
+
+**NEVER use `bd` CLI commands in code.** The `bd` CLI is deprecated and should not be called via `Bun.$` or any shell execution.
+
+Instead, use the **HiveAdapter** from `swarm-mail` package:
+
+```typescript
+import { createHiveAdapter } from "swarm-mail";
+
+const adapter = await createHiveAdapter({ projectPath: "/path/to/project" });
+
+// Query cells
+const cells = await adapter.queryCells({ status: "open" });
+
+// Create cell
+const cell = await adapter.createCell({ title: "Task", type: "task" });
+
+// Update cell
+await adapter.updateCell(cellId, { description: "Updated" });
+
+// Close cell
+await adapter.closeCell(cellId, "Done");
+```
+
+**Why?** The `bd` CLI requires a separate installation and isn't available in all environments. The HiveAdapter provides the same functionality programmatically with proper TypeScript types.
+
 ## Prime Directive: TDD Everything
 
 **All code changes MUST follow Test-Driven Development:**

@@ -16,7 +16,8 @@
 
 import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
-import { sendSwarmMessage } from "swarm-mail";
+import { sendSwarmMessage, type HiveAdapter } from "swarm-mail";
+import { getHiveAdapter } from "./hive";
 
 // ============================================================================
 // Types & Schemas
@@ -49,23 +50,25 @@ export interface ReviewResult {
   remaining_attempts?: number;
 }
 
-export const ReviewResultSchema = z.object({
-  status: z.enum(["approved", "needs_changes"]),
-  summary: z.string().optional(),
-  issues: z.array(ReviewIssueSchema).optional(),
-  remaining_attempts: z.number().optional(),
-}).refine(
-  (data) => {
-    // If status is needs_changes, issues must be provided
-    if (data.status === "needs_changes") {
-      return data.issues && data.issues.length > 0;
+export const ReviewResultSchema = z
+  .object({
+    status: z.enum(["approved", "needs_changes"]),
+    summary: z.string().optional(),
+    issues: z.array(ReviewIssueSchema).optional(),
+    remaining_attempts: z.number().optional(),
+  })
+  .refine(
+    (data) => {
+      // If status is needs_changes, issues must be provided
+      if (data.status === "needs_changes") {
+        return data.issues && data.issues.length > 0;
+      }
+      return true;
+    },
+    {
+      message: "issues array is required when status is 'needs_changes'",
     }
-    return true;
-  },
-  {
-    message: "issues array is required when status is 'needs_changes'",
-  }
-);
+  );
 
 /**
  * Dependency info for review context
@@ -183,7 +186,10 @@ export function generateReviewPrompt(context: ReviewPromptContext): string {
   sections.push("");
 
   // Dependency context
-  if (context.completed_dependencies && context.completed_dependencies.length > 0) {
+  if (
+    context.completed_dependencies &&
+    context.completed_dependencies.length > 0
+  ) {
     sections.push("## This Task Builds On");
     for (const dep of context.completed_dependencies) {
       sections.push(`- **${dep.title}** (${dep.id})`);
@@ -222,12 +228,20 @@ export function generateReviewPrompt(context: ReviewPromptContext): string {
   sections.push("");
   sections.push("Please evaluate the changes against these criteria:");
   sections.push("");
-  sections.push("1. **Fulfills Requirements**: Does the code implement what the task requires?");
-  sections.push("2. **Serves Epic Goal**: Does this work contribute to the overall epic objective?");
-  sections.push("3. **Enables Downstream**: Can downstream tasks use this work as expected?");
+  sections.push(
+    "1. **Fulfills Requirements**: Does the code implement what the task requires?"
+  );
+  sections.push(
+    "2. **Serves Epic Goal**: Does this work contribute to the overall epic objective?"
+  );
+  sections.push(
+    "3. **Enables Downstream**: Can downstream tasks use this work as expected?"
+  );
   sections.push("4. **Type Safety**: Are types correct and complete?");
   sections.push("5. **No Critical Bugs**: Are there any obvious bugs or issues?");
-  sections.push("6. **Test Coverage**: Are there tests for the new code? (warning only)");
+  sections.push(
+    "6. **Test Coverage**: Are there tests for the new code? (warning only)"
+  );
   sections.push("");
 
   // Response format
@@ -253,6 +267,67 @@ export function generateReviewPrompt(context: ReviewPromptContext): string {
 }
 
 // ============================================================================
+// HiveAdapter Helper
+// ============================================================================
+
+/**
+ * Get or create a HiveAdapter for a project (safe wrapper)
+ */
+async function getHiveAdapterSafe(projectPath: string): Promise<HiveAdapter | null> {
+  try {
+    return getHiveAdapter(projectPath);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get dependencies for a cell by querying all cells and checking their parent_id
+ * Note: This is a simplified approach - a full implementation would use the dependency graph
+ */
+async function getCellDependencies(
+  adapter: HiveAdapter,
+  projectKey: string,
+  _cellId: string,
+  epicId: string
+): Promise<{ completed: DependencyInfo[]; downstream: DownstreamTask[] }> {
+  const completedDependencies: DependencyInfo[] = [];
+  const downstreamTasks: DownstreamTask[] = [];
+
+  try {
+    // Get all subtasks of the epic
+    const subtasks = await adapter.queryCells(projectKey, { parent_id: epicId });
+    
+    for (const subtask of subtasks) {
+      // Skip the current task
+      if (subtask.id === _cellId) continue;
+
+      // Completed tasks are potential dependencies
+      if (subtask.status === "closed") {
+        completedDependencies.push({
+          id: subtask.id,
+          title: subtask.title,
+          summary: subtask.closed_reason ?? undefined,
+        });
+      }
+      
+      // For downstream, we'd need to check the dependency graph
+      // For now, we include all non-closed tasks as potential downstream
+      if (subtask.status !== "closed") {
+        downstreamTasks.push({
+          id: subtask.id,
+          title: subtask.title,
+        });
+      }
+    }
+  } catch {
+    // Continue without dependency info
+  }
+
+  return { completed: completedDependencies, downstream: downstreamTasks };
+}
+
+// ============================================================================
 // Tool Definitions
 // ============================================================================
 
@@ -267,109 +342,75 @@ export const swarm_review = tool({
     "Generate a review prompt for a completed subtask. Includes epic context, dependencies, and diff.",
   args: {
     project_key: z.string().describe("Project path"),
-    epic_id: z.string().describe("Epic bead ID"),
-    task_id: z.string().describe("Subtask bead ID to review"),
+    epic_id: z.string().describe("Epic cell ID"),
+    task_id: z.string().describe("Subtask cell ID to review"),
     files_touched: z
       .array(z.string())
       .optional()
       .describe("Files modified (will get diff for these)"),
   },
   async execute(args): Promise<string> {
-    // Get epic details from beads
-    const epicResult = await Bun.$`bd show ${args.epic_id} --json`
-      .cwd(args.project_key)
-      .quiet()
-      .nothrow();
-
     let epicTitle = args.epic_id;
     let epicDescription: string | undefined;
-
-    if (epicResult.exitCode === 0) {
-      try {
-        const epic = JSON.parse(epicResult.stdout.toString());
-        epicTitle = epic.title || epicTitle;
-        epicDescription = epic.description;
-      } catch {
-        // Use defaults
-      }
-    }
-
-    // Get task details
-    const taskResult = await Bun.$`bd show ${args.task_id} --json`
-      .cwd(args.project_key)
-      .quiet()
-      .nothrow();
-
     let taskTitle = args.task_id;
     let taskDescription: string | undefined;
+    let completedDependencies: DependencyInfo[] = [];
+    let downstreamTasks: DownstreamTask[] = [];
 
-    if (taskResult.exitCode === 0) {
+    // Try to get cell details from HiveAdapter
+    const adapter = await getHiveAdapterSafe(args.project_key);
+    if (adapter) {
       try {
-        const task = JSON.parse(taskResult.stdout.toString());
-        taskTitle = task.title || taskTitle;
-        taskDescription = task.description;
+        // Get epic details
+        const epic = await adapter.getCell(args.project_key, args.epic_id);
+        if (epic) {
+          epicTitle = epic.title || epicTitle;
+          epicDescription = epic.description ?? undefined;
+        }
+
+        // Get task details
+        const task = await adapter.getCell(args.project_key, args.task_id);
+        if (task) {
+          taskTitle = task.title || taskTitle;
+          taskDescription = task.description ?? undefined;
+        }
+
+        // Get dependencies
+        const deps = await getCellDependencies(
+          adapter,
+          args.project_key,
+          args.task_id,
+          args.epic_id
+        );
+        completedDependencies = deps.completed;
+        downstreamTasks = deps.downstream;
       } catch {
-        // Use defaults
+        // Continue with defaults if adapter fails
       }
     }
 
     // Get git diff for files
     let diff = "";
     if (args.files_touched && args.files_touched.length > 0) {
-      const diffResult = await Bun.$`git diff HEAD~1 -- ${args.files_touched}`
-        .cwd(args.project_key)
-        .quiet()
-        .nothrow();
-
-      if (diffResult.exitCode === 0) {
-        diff = diffResult.stdout.toString();
-      } else {
-        // Try staged diff
-        const stagedResult = await Bun.$`git diff --cached -- ${args.files_touched}`
+      try {
+        const diffResult = await Bun.$`git diff HEAD~1 -- ${args.files_touched}`
           .cwd(args.project_key)
           .quiet()
           .nothrow();
-        diff = stagedResult.stdout.toString();
-      }
-    }
 
-    // Get subtasks to find dependencies and downstream
-    const subtasksResult = await Bun.$`bd list --parent ${args.epic_id} --json`
-      .cwd(args.project_key)
-      .quiet()
-      .nothrow();
-
-    const completedDependencies: DependencyInfo[] = [];
-    const downstreamTasks: DownstreamTask[] = [];
-
-    if (subtasksResult.exitCode === 0) {
-      try {
-        const subtasks = JSON.parse(subtasksResult.stdout.toString());
-        for (const subtask of subtasks) {
-          if (subtask.id === args.task_id) continue;
-
-          // Check if this task depends on the reviewed task
-          if (subtask.dependencies?.includes(args.task_id)) {
-            downstreamTasks.push({
-              id: subtask.id,
-              title: subtask.title,
-            });
-          }
-
-          // Check if reviewed task depends on this (and it's complete)
-          // This would require checking the task's dependencies field
-          if (subtask.status === "closed") {
-            // For now, include all completed tasks as potential dependencies
-            // A more sophisticated implementation would check actual dependency graph
-            completedDependencies.push({
-              id: subtask.id,
-              title: subtask.title,
-              summary: subtask.close_reason,
-            });
-          }
+        if (diffResult.exitCode === 0) {
+          diff = diffResult.stdout.toString();
+        } else {
+          // Try staged diff
+          const stagedResult =
+            await Bun.$`git diff --cached -- ${args.files_touched}`
+              .cwd(args.project_key)
+              .quiet()
+              .nothrow();
+          diff = stagedResult.stdout.toString();
         }
       } catch {
-        // Continue without dependency info
+        // Git diff failed, continue without it
       }
     }
 
@@ -383,8 +424,10 @@ export const swarm_review = tool({
       task_description: taskDescription,
       files_touched: args.files_touched || [],
       diff: diff || "(no diff available)",
-      completed_dependencies: completedDependencies.length > 0 ? completedDependencies : undefined,
-      downstream_tasks: downstreamTasks.length > 0 ? downstreamTasks : undefined,
+      completed_dependencies:
+        completedDependencies.length > 0 ? completedDependencies : undefined,
+      downstream_tasks:
+        downstreamTasks.length > 0 ? downstreamTasks : undefined,
     });
 
     return JSON.stringify(
@@ -402,7 +445,7 @@ export const swarm_review = tool({
         },
       },
       null,
-      2,
+      2
     );
   },
 });
@@ -417,7 +460,7 @@ export const swarm_review_feedback = tool({
     "Send review feedback to a worker. Tracks attempts (max 3). Fails task after 3 rejections.",
   args: {
     project_key: z.string().describe("Project path"),
-    task_id: z.string().describe("Subtask bead ID"),
+    task_id: z.string().describe("Subtask cell ID"),
     worker_id: z.string().describe("Worker agent name"),
     status: z.enum(["approved", "needs_changes"]).describe("Review status"),
     summary: z.string().optional().describe("Review summary"),
@@ -439,7 +482,7 @@ export const swarm_review_feedback = tool({
             error: "Failed to parse issues JSON",
           },
           null,
-          2,
+          2
         );
       }
     }
@@ -452,7 +495,7 @@ export const swarm_review_feedback = tool({
           error: "needs_changes status requires at least one issue",
         },
         null,
-        2,
+        2
       );
     }
 
@@ -462,8 +505,8 @@ export const swarm_review_feedback = tool({
       : args.task_id;
 
     if (args.status === "approved") {
-      // Clear attempts on approval
-      clearAttempts(args.task_id);
+      // Mark as approved and clear attempts
+      markReviewApproved(args.task_id);
 
       // Send approval message
       await sendSwarmMessage({
@@ -488,7 +531,7 @@ You may now complete the task with \`swarm_complete\`.`,
           message: "Review approved. Worker can now complete the task.",
         },
         null,
-        2,
+        2
       );
     }
 
@@ -498,11 +541,15 @@ You may now complete the task with \`swarm_complete\`.`,
 
     // Check if task should fail
     if (remaining <= 0) {
-      // Mark task as failed
-      await Bun.$`bd update ${args.task_id} --status blocked --json`
-        .cwd(args.project_key)
-        .quiet()
-        .nothrow();
+      // Mark task as blocked using HiveAdapter
+      const adapter = await getHiveAdapterSafe(args.project_key);
+      if (adapter) {
+        try {
+          await adapter.changeCellStatus(args.project_key, args.task_id, "blocked");
+        } catch {
+          // Continue even if status update fails
+        }
+      }
 
       // Send failure message
       await sendSwarmMessage({
@@ -533,7 +580,7 @@ The task has been marked as blocked. A human or different approach is needed.`,
           message: `Task failed after ${MAX_REVIEW_ATTEMPTS} review attempts`,
         },
         null,
-        2,
+        2
       );
     }
 
@@ -578,7 +625,7 @@ Please fix these issues and request another review.`,
         message: `Feedback sent. ${remaining} attempt(s) remaining.`,
       },
       null,
-      2,
+      2
     );
   },
 });
