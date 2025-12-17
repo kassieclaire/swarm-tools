@@ -48,6 +48,8 @@ export {
   closeSwarmMail,
   closeAllSwarmMail,
   getDatabasePath,
+  getProjectTempDirName,
+  hashProjectPath,
   PGlite,
 } from "./pglite";
 

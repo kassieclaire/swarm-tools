@@ -27,8 +27,9 @@ import { PGlite } from "@electric-sql/pglite";
 import { createSwarmMailAdapter } from "./adapter";
 import type { DatabaseAdapter, SwarmMailAdapter } from "./types";
 import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { join, basename } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import { createSocketAdapter } from "./socket-adapter";
 import { isDaemonRunning, startDaemon, healthCheck } from "./daemon";
 
@@ -50,27 +51,69 @@ export function wrapPGlite(pglite: PGlite): DatabaseAdapter {
 }
 
 /**
- * Get database path (project-local or global fallback)
+ * Generate a short hash for a project path
  *
- * Prefers project-local .opencode/streams
- * Falls back to global ~/.opencode/streams
+ * Uses SHA256 and takes first 8 characters for uniqueness.
+ *
+ * @param projectPath - Project root path
+ * @returns 8-character hash string
+ */
+export function hashProjectPath(projectPath: string): string {
+  return createHash("sha256").update(projectPath).digest("hex").slice(0, 8);
+}
+
+/**
+ * Get a human-readable project identifier with hash suffix
+ *
+ * Format: `opencode-<project-name>-<hash>`
+ * Example: `opencode-my-project-a1b2c3d4`
+ *
+ * @param projectPath - Project root path
+ * @returns Directory name for the project's temp storage
+ */
+export function getProjectTempDirName(projectPath: string): string {
+  const projectName = basename(projectPath)
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-") // sanitize for filesystem
+    .replace(/-+/g, "-") // collapse multiple dashes
+    .slice(0, 32); // limit length
+  const hash = hashProjectPath(projectPath);
+  return `opencode-${projectName}-${hash}`;
+}
+
+/**
+ * Get database path in $TMPDIR (ephemeral storage)
+ *
+ * Streams data is ephemeral coordination state - messages, reservations,
+ * agent registrations. It's safe to lose on reboot since:
+ * - Beads are git-synced separately in .beads/
+ * - Semantic memory is in ~/.opencode/memory/
+ * - Agents re-register on session start
+ *
+ * Path format: `$TMPDIR/opencode-<project-name>-<hash>/streams`
+ * Falls back to global `$TMPDIR/opencode-global/streams` if no project path.
  *
  * @param projectPath - Optional project root path
  * @returns Absolute path to database directory
  */
 export function getDatabasePath(projectPath?: string): string {
+  const tmp = tmpdir();
+  
   if (projectPath) {
-    const localDir = join(projectPath, ".opencode");
-    if (!existsSync(localDir)) {
-      mkdirSync(localDir, { recursive: true });
+    const dirName = getProjectTempDirName(projectPath);
+    const projectTmpDir = join(tmp, dirName);
+    if (!existsSync(projectTmpDir)) {
+      mkdirSync(projectTmpDir, { recursive: true });
     }
-    return join(localDir, "streams");
+    return join(projectTmpDir, "streams");
   }
-  const globalDir = join(homedir(), ".opencode");
-  if (!existsSync(globalDir)) {
-    mkdirSync(globalDir, { recursive: true });
+  
+  // Global fallback for when no project path is provided
+  const globalTmpDir = join(tmp, "opencode-global");
+  if (!existsSync(globalTmpDir)) {
+    mkdirSync(globalTmpDir, { recursive: true });
   }
-  return join(globalDir, "streams");
+  return join(globalTmpDir, "streams");
 }
 
 /**

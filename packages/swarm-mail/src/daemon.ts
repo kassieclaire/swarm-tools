@@ -23,8 +23,8 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { readFile, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
-import { getDatabasePath } from "./pglite";
+import { tmpdir } from "node:os";
+import { getDatabasePath, getProjectTempDirName } from "./pglite";
 
 /**
  * Daemon start options
@@ -57,25 +57,31 @@ export interface DaemonInfo {
 /**
  * Get PID file path for a project
  *
- * Prefers project-local .opencode/pglite-server.pid
- * Falls back to global ~/.opencode/pglite-server.pid
+ * Stores PID file in $TMPDIR alongside the streams database.
+ * Path format: `$TMPDIR/opencode-<project-name>-<hash>/pglite-server.pid`
+ * Falls back to global `$TMPDIR/opencode-global/pglite-server.pid`
  *
  * @param projectPath - Optional project root path
  * @returns Absolute path to PID file
  */
 export function getPidFilePath(projectPath?: string): string {
+  const tmp = tmpdir();
+  
   if (projectPath) {
-    const localDir = join(projectPath, ".opencode");
-    if (!existsSync(localDir)) {
-      mkdirSync(localDir, { recursive: true });
+    const dirName = getProjectTempDirName(projectPath);
+    const projectTmpDir = join(tmp, dirName);
+    if (!existsSync(projectTmpDir)) {
+      mkdirSync(projectTmpDir, { recursive: true });
     }
-    return join(localDir, "pglite-server.pid");
+    return join(projectTmpDir, "pglite-server.pid");
   }
-  const globalDir = join(homedir(), ".opencode");
-  if (!existsSync(globalDir)) {
-    mkdirSync(globalDir, { recursive: true });
+  
+  // Global fallback
+  const globalTmpDir = join(tmp, "opencode-global");
+  if (!existsSync(globalTmpDir)) {
+    mkdirSync(globalTmpDir, { recursive: true });
   }
-  return join(globalDir, "pglite-server.pid");
+  return join(globalTmpDir, "pglite-server.pid");
 }
 
 /**

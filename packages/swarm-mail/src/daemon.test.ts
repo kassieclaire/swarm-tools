@@ -9,12 +9,14 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync } from "node:fs";
 import { rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   getPidFilePath,
   isDaemonRunning,
   startDaemon,
   stopDaemon,
 } from "./daemon";
+import { getProjectTempDirName } from "./pglite";
 
 describe("daemon lifecycle", () => {
   const testProjectPath = join(process.cwd(), ".test-daemon");
@@ -35,17 +37,18 @@ describe("daemon lifecycle", () => {
   });
 
   describe("getPidFilePath", () => {
-    test("returns project-local path when projectPath provided", () => {
+    test("returns $TMPDIR path when projectPath provided", () => {
       const pidPath = getPidFilePath(testProjectPath);
-      expect(pidPath).toBe(join(testProjectPath, ".opencode", "pglite-server.pid"));
-      expect(existsSync(join(testProjectPath, ".opencode"))).toBe(true);
+      const expectedDir = join(tmpdir(), getProjectTempDirName(testProjectPath));
+      expect(pidPath).toBe(join(expectedDir, "pglite-server.pid"));
+      // Directory should be created
+      expect(existsSync(expectedDir)).toBe(true);
     });
 
-    test("returns global path when no projectPath", () => {
+    test("returns global $TMPDIR path when no projectPath", () => {
       const pidPath = getPidFilePath();
-      expect(pidPath).toContain(".opencode/pglite-server.pid");
-      const homeDir = process.env.HOME || process.env.USERPROFILE || "";
-      expect(pidPath).toContain(homeDir);
+      expect(pidPath).toContain("opencode-global/pglite-server.pid");
+      expect(pidPath).toContain(tmpdir());
     });
   });
 
