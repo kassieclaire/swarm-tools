@@ -41,6 +41,8 @@ import {
 } from "./swarm-mail";
 import { structuredTools } from "./structured";
 import { swarmTools } from "./swarm";
+import { worktreeTools } from "./swarm-worktree";
+import { reviewTools } from "./swarm-review";
 import { repoCrawlTools } from "./repo-crawl";
 import { skillsTools, setSkillsProjectDirectory } from "./skills";
 import { mandateTools } from "./mandates";
@@ -154,6 +156,8 @@ export const SwarmPlugin: Plugin = async (
       ...swarmMailTools,
       ...structuredTools,
       ...swarmTools,
+      ...worktreeTools,
+      ...reviewTools,
       ...repoCrawlTools,
       ...skillsTools,
       ...mandateTools,
@@ -410,6 +414,8 @@ export const allTools = {
   ...swarmMailTools,
   ...structuredTools,
   ...swarmTools,
+  ...worktreeTools,
+  ...reviewTools,
   ...repoCrawlTools,
   ...skillsTools,
   ...mandateTools,
@@ -622,3 +628,21 @@ export {
   type GuardrailResult,
   type GuardrailMetrics,
 } from "./output-guardrails";
+
+/**
+ * Re-export compaction-hook module
+ *
+ * Includes:
+ * - SWARM_COMPACTION_CONTEXT - Prompt text for swarm state preservation
+ * - createCompactionHook - Factory function for the compaction hook
+ *
+ * Usage:
+ * ```typescript
+ * import { createCompactionHook } from "opencode-swarm-plugin";
+ *
+ * const hooks = {
+ *   "experimental.session.compacting": createCompactionHook(),
+ * };
+ * ```
+ */
+export { SWARM_COMPACTION_CONTEXT, createCompactionHook } from "./compaction-hook";

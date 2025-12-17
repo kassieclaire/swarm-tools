@@ -419,6 +419,12 @@ const swarm_init = tool({
   description: "Initialize swarm session and check tool availability",
   args: {
     project_path: tool.schema.string().optional().describe("Project path"),
+    isolation: tool.schema
+      .enum(["worktree", "reservation"])
+      .optional()
+      .describe(
+        "Isolation mode: 'worktree' for git worktree isolation, 'reservation' for file reservations (default)",
+      ),
   },
   execute: (args, ctx) => execTool("swarm_init", args, ctx),
 });
@@ -533,18 +539,26 @@ const swarm_progress = tool({
 
 const swarm_complete = tool({
   description:
-    "Mark subtask complete, release reservations, notify coordinator",
+    "Mark subtask complete with Verification Gate. Runs UBS scan, typecheck, and tests before allowing completion.",
   args: {
     project_key: tool.schema.string().describe("Project key"),
     agent_name: tool.schema.string().describe("Agent name"),
     bead_id: tool.schema.string().describe("Bead ID"),
     summary: tool.schema.string().describe("Completion summary"),
-    evaluation: tool.schema.string().optional().describe("Self-evaluation"),
+    evaluation: tool.schema.string().optional().describe("Self-evaluation JSON"),
     files_touched: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Files modified"),
+      .describe("Files modified - will be verified"),
     skip_ubs_scan: tool.schema.boolean().optional().describe("Skip UBS scan"),
+    skip_verification: tool.schema
+      .boolean()
+      .optional()
+      .describe("Skip ALL verification (UBS, typecheck, tests)"),
+    skip_review: tool.schema
+      .boolean()
+      .optional()
+      .describe("Skip review gate check"),
   },
   execute: (args, ctx) => execTool("swarm_complete", args, ctx),
 });
@@ -639,6 +653,117 @@ const swarm_evaluation_prompt = tool({
       .describe("Files modified"),
   },
   execute: (args, ctx) => execTool("swarm_evaluation_prompt", args, ctx),
+});
+
+const swarm_broadcast = tool({
+  description:
+    "Broadcast context update to all agents working on the same epic",
+  args: {
+    project_path: tool.schema.string().describe("Project path"),
+    agent_name: tool.schema.string().describe("Agent name"),
+    epic_id: tool.schema.string().describe("Epic ID"),
+    message: tool.schema.string().describe("Context update message"),
+    importance: tool.schema
+      .enum(["info", "warning", "blocker"])
+      .optional()
+      .describe("Priority level (default: info)"),
+    files_affected: tool.schema
+      .array(tool.schema.string())
+      .optional()
+      .describe("Files this context relates to"),
+  },
+  execute: (args, ctx) => execTool("swarm_broadcast", args, ctx),
+});
+
+// =============================================================================
+// Worktree Isolation Tools
+// =============================================================================
+
+const swarm_worktree_create = tool({
+  description:
+    "Create a git worktree for isolated task execution. Worker operates in worktree, not main branch.",
+  args: {
+    project_path: tool.schema.string().describe("Absolute path to project root"),
+    task_id: tool.schema.string().describe("Task/bead ID (e.g., bd-abc123.1)"),
+    start_commit: tool.schema
+      .string()
+      .describe("Commit SHA to create worktree at (swarm start point)"),
+  },
+  execute: (args, ctx) => execTool("swarm_worktree_create", args, ctx),
+});
+
+const swarm_worktree_merge = tool({
+  description:
+    "Cherry-pick commits from worktree back to main branch. Call after worker completes.",
+  args: {
+    project_path: tool.schema.string().describe("Absolute path to project root"),
+    task_id: tool.schema.string().describe("Task/bead ID"),
+    start_commit: tool.schema
+      .string()
+      .optional()
+      .describe("Original start commit (to find new commits)"),
+  },
+  execute: (args, ctx) => execTool("swarm_worktree_merge", args, ctx),
+});
+
+const swarm_worktree_cleanup = tool({
+  description:
+    "Remove a worktree after completion or abort. Idempotent - safe to call multiple times.",
+  args: {
+    project_path: tool.schema.string().describe("Absolute path to project root"),
+    task_id: tool.schema.string().optional().describe("Task/bead ID to clean up"),
+    cleanup_all: tool.schema
+      .boolean()
+      .optional()
+      .describe("Remove all worktrees for this project"),
+  },
+  execute: (args, ctx) => execTool("swarm_worktree_cleanup", args, ctx),
+});
+
+const swarm_worktree_list = tool({
+  description: "List all active worktrees for a project",
+  args: {
+    project_path: tool.schema.string().describe("Absolute path to project root"),
+  },
+  execute: (args, ctx) => execTool("swarm_worktree_list", args, ctx),
+});
+
+// =============================================================================
+// Structured Review Tools
+// =============================================================================
+
+const swarm_review = tool({
+  description:
+    "Generate a review prompt for a completed subtask. Includes epic context, dependencies, and diff.",
+  args: {
+    project_key: tool.schema.string().describe("Project path"),
+    epic_id: tool.schema.string().describe("Epic bead ID"),
+    task_id: tool.schema.string().describe("Subtask bead ID to review"),
+    files_touched: tool.schema
+      .array(tool.schema.string())
+      .optional()
+      .describe("Files modified (will get diff for these)"),
+  },
+  execute: (args, ctx) => execTool("swarm_review", args, ctx),
+});
+
+const swarm_review_feedback = tool({
+  description:
+    "Send review feedback to a worker. Tracks attempts (max 3). Fails task after 3 rejections.",
+  args: {
+    project_key: tool.schema.string().describe("Project path"),
+    task_id: tool.schema.string().describe("Subtask bead ID"),
+    worker_id: tool.schema.string().describe("Worker agent name"),
+    status: tool.schema
+      .enum(["approved", "needs_changes"])
+      .describe("Review status"),
+    summary: tool.schema.string().optional().describe("Review summary"),
+    issues: tool.schema
+      .string()
+      .optional()
+      .describe("JSON array of ReviewIssue objects (for needs_changes)"),
+  },
+  execute: (args, ctx) => execTool("swarm_review_feedback", args, ctx),
 });
 
 // =============================================================================
@@ -754,9 +879,130 @@ const skills_execute = tool({
 // Plugin Export
 // =============================================================================
 
+// =============================================================================
+// Compaction Hook - Swarm Recovery Context
+// =============================================================================
+
+/**
+ * Check for swarm sign - evidence a swarm passed through
+ *
+ * Like deer scat on a trail, we look for traces:
+ * - In-progress beads (active work)
+ * - Open beads with parent_id (subtasks of an epic)
+ * - Unclosed epics
+ */
+async function hasSwarmSign(): Promise<boolean> {
+  try {
+    const result = await new Promise<{ exitCode: number; stdout: string }>(
+      (resolve) => {
+        // Use swarm tool to query beads
+        const proc = spawn(SWARM_CLI, ["tool", "beads_query"], {
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        let stdout = "";
+        proc.stdout.on("data", (d) => {
+          stdout += d;
+        });
+        proc.on("close", (exitCode) =>
+          resolve({ exitCode: exitCode ?? 1, stdout }),
+        );
+      },
+    );
+
+    if (result.exitCode !== 0) return false;
+
+    const beads = JSON.parse(result.stdout);
+    if (!Array.isArray(beads)) return false;
+
+    // Look for swarm sign:
+    // 1. Any in_progress beads
+    // 2. Any open beads with a parent (subtasks)
+    // 3. Any epics that aren't closed
+    return beads.some(
+      (b: { status: string; parent_id?: string; type?: string }) =>
+        b.status === "in_progress" ||
+        (b.status === "open" && b.parent_id) ||
+        (b.type === "epic" && b.status !== "closed"),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Swarm-aware compaction context
+ *
+ * Injected during compaction to keep the swarm cooking. The coordinator should
+ * wake up from compaction and immediately resume orchestration - spawning agents,
+ * monitoring progress, unblocking work.
+ */
+const SWARM_COMPACTION_CONTEXT = `## 🐝 SWARM ACTIVE - Keep Cooking
+
+You are the **COORDINATOR** of an active swarm. Context was compacted but the swarm is still running.
+
+**YOUR JOB:** Keep orchestrating. Spawn agents. Monitor progress. Unblock work. Ship it.
+
+### Preserve in Summary
+
+Extract from session context:
+
+1. **Epic & Subtasks** - IDs, titles, status, file assignments
+2. **What's Running** - Which agents are active, what they're working on  
+3. **What's Blocked** - Blockers and what's needed to unblock
+4. **What's Done** - Completed work and any follow-ups needed
+5. **What's Next** - Pending subtasks ready to spawn
+
+### Summary Format
+
+\`\`\`
+## 🐝 Swarm State
+
+**Epic:** <bd-xxx> - <title>
+**Project:** <path>
+**Progress:** X/Y subtasks complete
+
+**Active:**
+- <bd-xxx>: <title> [in_progress] → <agent> working on <files>
+
+**Blocked:**
+- <bd-xxx>: <title> - BLOCKED: <reason>
+
+**Completed:**
+- <bd-xxx>: <title> ✓
+
+**Ready to Spawn:**
+- <bd-xxx>: <title> (files: <...>)
+\`\`\`
+
+### On Resume - IMMEDIATELY
+
+1. \`swarm_status(epic_id="<epic>", project_key="<path>")\` - Get current state
+2. \`swarmmail_inbox(limit=5)\` - Check for agent messages
+3. **Spawn ready subtasks** - Don't wait, fire them off
+4. **Unblock blocked work** - Resolve dependencies, reassign if needed
+5. **Collect completed work** - Close done subtasks, verify quality
+
+### Keep the Swarm Cooking
+
+- **Spawn aggressively** - If a subtask is ready and unblocked, spawn an agent
+- **Monitor actively** - Check status, read messages, respond to blockers
+- **Close the loop** - When all subtasks done, verify and close the epic
+- **Don't stop** - The swarm runs until the epic is closed
+
+**You are not waiting for instructions. You are the coordinator. Coordinate.**
+`;
+
+// Extended hooks type to include experimental compaction hook
+type ExtendedHooks = Hooks & {
+  "experimental.session.compacting"?: (
+    input: { sessionID: string },
+    output: { context: string[] },
+  ) => Promise<void>;
+};
+
 export const SwarmPlugin: Plugin = async (
   _input: PluginInput,
-): Promise<Hooks> => {
+): Promise<ExtendedHooks> => {
   return {
     tool: {
       // Beads
@@ -798,6 +1044,15 @@ export const SwarmPlugin: Plugin = async (
       swarm_spawn_subtask,
       swarm_complete_subtask,
       swarm_evaluation_prompt,
+      swarm_broadcast,
+      // Worktree Isolation
+      swarm_worktree_create,
+      swarm_worktree_merge,
+      swarm_worktree_cleanup,
+      swarm_worktree_list,
+      // Structured Review
+      swarm_review,
+      swarm_review_feedback,
       // Skills
       skills_list,
       skills_read,
@@ -808,6 +1063,17 @@ export const SwarmPlugin: Plugin = async (
       skills_init,
       skills_add_script,
       skills_execute,
+    },
+
+    // Swarm-aware compaction hook - only fires if there's an active swarm
+    "experimental.session.compacting": async (
+      _input: { sessionID: string },
+      output: { context: string[] },
+    ) => {
+      const hasSign = await hasSwarmSign();
+      if (hasSign) {
+        output.context.push(SWARM_COMPACTION_CONTEXT);
+      }
     },
   };
 };
