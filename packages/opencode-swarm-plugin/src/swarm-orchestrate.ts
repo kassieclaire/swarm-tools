@@ -67,6 +67,7 @@ import {
   isToolAvailable,
   warnMissingTool,
 } from "./tool-availability";
+import { getHiveAdapter } from "./hive";
 import { listSkills } from "./skills";
 import {
   canUseWorktreeIsolation,
@@ -82,45 +83,34 @@ import {
 // ============================================================================
 
 /**
- * Query beads for subtasks of an epic
+ * Query beads for subtasks of an epic using HiveAdapter (not bd CLI)
  */
-async function queryEpicSubtasks(epicId: string): Promise<Bead[]> {
-  // Check if beads is available
-  const beadsAvailable = await isToolAvailable("beads");
-  if (!beadsAvailable) {
-    warnMissingTool("beads");
-    return []; // Return empty - swarm can still function without status tracking
-  }
-
-  const result = await Bun.$`bd list --parent ${epicId} --json`
-    .quiet()
-    .nothrow();
-
-  if (result.exitCode !== 0) {
-    // Don't throw - just return empty and log error prominently
+async function queryEpicSubtasks(projectKey: string, epicId: string): Promise<Bead[]> {
+  try {
+    const adapter = await getHiveAdapter(projectKey);
+    const cells = await adapter.queryCells(projectKey, { parent_id: epicId });
+    // Map Cell (from HiveAdapter) to Bead schema format
+    // Cell uses `type` and numeric timestamps, Bead uses `issue_type` and ISO strings
+    return cells
+      .filter(cell => cell.status !== "tombstone") // Exclude deleted cells
+      .map(cell => ({
+        id: cell.id,
+        title: cell.title,
+        description: cell.description || "",
+        status: cell.status as "open" | "in_progress" | "blocked" | "closed",
+        priority: cell.priority,
+        issue_type: cell.type as "bug" | "feature" | "task" | "epic" | "chore",
+        created_at: new Date(cell.created_at).toISOString(),
+        updated_at: cell.updated_at ? new Date(cell.updated_at).toISOString() : undefined,
+        dependencies: [], // Dependencies fetched separately if needed
+        metadata: {},
+      }));
+  } catch (error) {
     console.error(
       `[swarm] ERROR: Failed to query subtasks for epic ${epicId}:`,
-      result.stderr.toString(),
+      error instanceof Error ? error.message : String(error),
     );
     return [];
-  }
-
-  try {
-    const parsed = JSON.parse(result.stdout.toString());
-    return z.array(BeadSchema).parse(parsed);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      console.error(
-        `[swarm] ERROR: Invalid bead data for epic ${epicId}:`,
-        error.message,
-      );
-      return [];
-    }
-    console.error(
-      `[swarm] ERROR: Failed to parse beads for epic ${epicId}:`,
-      error,
-    );
-    throw error;
   }
 }
 
@@ -758,7 +748,7 @@ export const swarm_status = tool({
   },
   async execute(args) {
     // Query subtasks from beads
-    const subtasks = await queryEpicSubtasks(args.epic_id);
+    const subtasks = await queryEpicSubtasks(args.project_key, args.epic_id);
 
     // Count statuses
     const statusCounts = {
@@ -878,12 +868,16 @@ export const swarm_progress = tool({
     // Validate
     const validated = AgentProgressSchema.parse(progress);
 
-    // Update cell status if needed
+    // Update cell status if needed (using HiveAdapter, not bd CLI)
     if (args.status === "blocked" || args.status === "in_progress") {
-      const beadStatus = args.status === "blocked" ? "blocked" : "in_progress";
-      await Bun.$`bd update ${args.bead_id} --status ${beadStatus} --json`
-        .quiet()
-        .nothrow();
+      try {
+        const adapter = await getHiveAdapter(args.project_key);
+        const newStatus = args.status === "blocked" ? "blocked" : "in_progress";
+        await adapter.changeCellStatus(args.project_key, args.bead_id, newStatus);
+      } catch (error) {
+        // Non-fatal - log but continue
+        console.error(`[swarm] Failed to update cell status: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
 
     // Extract epic ID from bead ID (e.g., bd-abc123.1 -> bd-abc123)
@@ -1157,9 +1151,8 @@ Or use skip_review=true to bypass (not recommended for production work).`,
         .replace(/\//g, "-")
         .replace(/\\/g, "-");
 
-      // Import HiveAdapter for validation
-      const { createHiveAdapter } = await import("swarm-mail");
-      const adapter = await createHiveAdapter({ projectPath: args.project_key });
+      // Use HiveAdapter for validation (not bd CLI)
+      const adapter = await getHiveAdapter(args.project_key);
 
       // 1. Check if bead exists
       const cell = await adapter.getCell(projectKey, args.bead_id);
@@ -1328,49 +1321,27 @@ Continuing with completion, but this should be fixed for future subtasks.`;
         }
       }
 
-      // Close the cell - use project_key as working directory to find correct .beads/
-      // This fixes the issue where cell ID prefix (e.g., "pdf-library-g84.2") doesn't match CWD
-      const closeResult =
-        await Bun.$`bd close ${args.bead_id} --reason ${args.summary} --json`
-          .cwd(args.project_key)
-          .quiet()
-          .nothrow();
-
-      if (closeResult.exitCode !== 0) {
-        const stderrOutput = closeResult.stderr.toString().trim();
-        const stdoutOutput = closeResult.stdout.toString().trim();
-
-        // Check for common error patterns and provide better guidance
-        const isNoDatabaseError = stderrOutput.includes("no beads database found");
-        const isNotFoundError = stderrOutput.includes("not found") || stderrOutput.includes("does not exist");
-
+      // Close the cell using HiveAdapter (not bd CLI)
+      try {
+        await adapter.closeCell(args.project_key, args.bead_id, args.summary);
+      } catch (closeError) {
+        const errorMessage = closeError instanceof Error ? closeError.message : String(closeError);
         return JSON.stringify(
           {
             success: false,
             error: "Failed to close cell",
-            failed_step: "bd close",
-            details: stderrOutput || stdoutOutput || "Unknown error from bd close command",
+            failed_step: "closeCell",
+            details: errorMessage,
             bead_id: args.bead_id,
             project_key: args.project_key,
             recovery: {
-              steps: isNoDatabaseError
-                ? [
-                    `1. Verify project_key is correct: "${args.project_key}"`,
-                    `2. Check .beads/ exists in that directory`,
-                    `3. Cell ID prefix "${args.bead_id.split("-")[0]}" should match project`,
-                    `4. Try: hive_close(id="${args.bead_id}", reason="...")`,
-                  ]
-                : [
-                    `1. Check cell exists: bd show ${args.bead_id}`,
-                    `2. Check cell status (might already be closed): hive_query()`,
-                    `3. If cell is blocked, unblock first: hive_update(id="${args.bead_id}", status="in_progress")`,
-                    `4. Try closing directly: hive_close(id="${args.bead_id}", reason="...")`,
-                  ],
-              hint: isNoDatabaseError
-                ? `The project_key "${args.project_key}" doesn't have a .beads/ directory. Make sure you're using the correct project path.`
-                : isNotFoundError
-                  ? `Cell "${args.bead_id}" not found. It may have been closed already or the ID is incorrect.`
-                  : "If cell is in 'blocked' status, you must change it to 'in_progress' or 'open' before closing.",
+              steps: [
+                `1. Check cell exists: hive_query()`,
+                `2. Check cell status (might already be closed)`,
+                `3. If cell is blocked, unblock first: hive_update(id="${args.bead_id}", status="in_progress")`,
+                `4. Try closing directly: hive_close(id="${args.bead_id}", reason="...")`,
+              ],
+              hint: "Cell may already be closed, or the ID is incorrect.",
             },
           },
           null,

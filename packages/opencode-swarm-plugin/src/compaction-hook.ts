@@ -5,6 +5,12 @@
  * When context is compacted, this hook injects instructions for the summarizer
  * to preserve swarm coordination state and enable seamless resumption.
  *
+ * ## Philosophy: Err on the Side of Continuation
+ * 
+ * It's better to inject swarm context unnecessarily than to lose an active swarm.
+ * The cost of a false positive (extra context) is low.
+ * The cost of a false negative (lost swarm) is high - wasted work, confused agents.
+ *
  * Hook signature (from @opencode-ai/plugin):
  * ```typescript
  * "experimental.session.compacting"?: (
@@ -22,6 +28,9 @@
  * };
  * ```
  */
+
+import { getHiveAdapter, getHiveWorkingDirectory } from "./hive";
+import { checkSwarmHealth } from "swarm-mail";
 
 // ============================================================================
 // Compaction Context
@@ -93,50 +102,187 @@ Extract from session context:
 **You are not waiting for instructions. You are the coordinator. Coordinate.**
 `;
 
+/**
+ * Fallback detection prompt - tells the compactor what to look for
+ * 
+ * Used when we can't definitively detect a swarm but want to be safe.
+ * The compactor can check the conversation context for these patterns.
+ */
+export const SWARM_DETECTION_FALLBACK = `## 🐝 Swarm Detection - Check Your Context
+
+**IMPORTANT:** Before summarizing, check if this session involves an active swarm.
+
+Look for ANY of these patterns in the conversation:
+
+### Tool Calls (definite swarm sign)
+- \`swarm_decompose\`, \`swarm_spawn_subtask\`, \`swarm_status\`, \`swarm_complete\`
+- \`swarmmail_init\`, \`swarmmail_reserve\`, \`swarmmail_send\`
+- \`hive_create_epic\`, \`hive_start\`, \`hive_close\`
+
+### IDs and Names
+- Cell IDs: \`bd-xxx\`, \`bd-xxx.N\` (subtask format)
+- Agent names: BlueLake, RedMountain, GreenValley, etc.
+- Epic references: "epic", "subtask", "parent"
+
+### Coordination Language
+- "spawn", "worker", "coordinator"
+- "reserve", "reservation", "files"
+- "blocked", "unblock", "dependency"
+- "progress", "complete", "in_progress"
+
+### If You Find Swarm Evidence
+
+Include this in your summary:
+1. Epic ID and title
+2. Project path
+3. Subtask status (running/blocked/done/pending)
+4. Any blockers or issues
+5. What should happen next
+
+**Then tell the resumed session:**
+"This is an active swarm. Check swarm_status and swarmmail_inbox immediately."
+`;
+
 // ============================================================================
-// Hook Registration Helper
+// Swarm Detection
 // ============================================================================
+
+/**
+ * Detection result with confidence level
+ */
+interface SwarmDetection {
+  detected: boolean;
+  confidence: "high" | "medium" | "low" | "none";
+  reasons: string[];
+}
 
 /**
  * Check for swarm sign - evidence a swarm passed through
  * 
- * Like deer scat on a trail, we look for traces:
- * - In-progress cells (active work)
- * - Open cells with parent_id (subtasks of an epic)
- * - Unclosed epics
+ * Uses multiple signals with different confidence levels:
+ * - HIGH: Active reservations, in_progress cells
+ * - MEDIUM: Open subtasks, unclosed epics, recent activity
+ * - LOW: Any cells exist, swarm-mail initialized
  * 
- * Uses the adapter directly to query beads.
+ * Philosophy: Err on the side of continuation.
  */
-import { getHiveAdapter, getHiveWorkingDirectory } from "./hive";
+async function detectSwarm(): Promise<SwarmDetection> {
+  const reasons: string[] = [];
+  let highConfidence = false;
+  let mediumConfidence = false;
+  let lowConfidence = false;
 
-async function hasSwarmSign(): Promise<boolean> {
   try {
     const projectKey = getHiveWorkingDirectory();
-    const adapter = await getHiveAdapter(projectKey);
-    const cells = await adapter.queryCells(projectKey, {});
-    
-    if (!Array.isArray(cells)) return false;
 
-    // Look for swarm sign:
-    // 1. Any in_progress cells
-    // 2. Any open cells with a parent (subtasks)
-    // 3. Any epics that aren't closed
-    return cells.some(
-      (c) =>
-        c.status === "in_progress" ||
-        (c.status === "open" && c.parent_id) ||
-        (c.type === "epic" && c.status !== "closed"),
-    );
+    // Check 1: Active reservations in swarm-mail (HIGH confidence)
+    try {
+      const health = await checkSwarmHealth(projectKey);
+      if (health.healthy && health.stats) {
+        if (health.stats.reservations > 0) {
+          highConfidence = true;
+          reasons.push(`${health.stats.reservations} active file reservations`);
+        }
+        if (health.stats.agents > 0) {
+          mediumConfidence = true;
+          reasons.push(`${health.stats.agents} registered agents`);
+        }
+        if (health.stats.messages > 0) {
+          lowConfidence = true;
+          reasons.push(`${health.stats.messages} swarm messages`);
+        }
+      }
+    } catch {
+      // Swarm-mail not available, continue with other checks
+    }
+
+    // Check 2: Hive cells (various confidence levels)
+    try {
+      const adapter = await getHiveAdapter(projectKey);
+      const cells = await adapter.queryCells(projectKey, {});
+
+      if (Array.isArray(cells) && cells.length > 0) {
+        // HIGH: Any in_progress cells
+        const inProgress = cells.filter((c) => c.status === "in_progress");
+        if (inProgress.length > 0) {
+          highConfidence = true;
+          reasons.push(`${inProgress.length} cells in_progress`);
+        }
+
+        // MEDIUM: Open subtasks (cells with parent_id)
+        const subtasks = cells.filter(
+          (c) => c.status === "open" && c.parent_id
+        );
+        if (subtasks.length > 0) {
+          mediumConfidence = true;
+          reasons.push(`${subtasks.length} open subtasks`);
+        }
+
+        // MEDIUM: Unclosed epics
+        const openEpics = cells.filter(
+          (c) => c.type === "epic" && c.status !== "closed"
+        );
+        if (openEpics.length > 0) {
+          mediumConfidence = true;
+          reasons.push(`${openEpics.length} unclosed epics`);
+        }
+
+        // MEDIUM: Recently updated cells (last hour)
+        const oneHourAgo = Date.now() - 60 * 60 * 1000;
+        const recentCells = cells.filter((c) => c.updated_at > oneHourAgo);
+        if (recentCells.length > 0) {
+          mediumConfidence = true;
+          reasons.push(`${recentCells.length} cells updated in last hour`);
+        }
+
+        // LOW: Any cells exist at all
+        if (cells.length > 0) {
+          lowConfidence = true;
+          reasons.push(`${cells.length} total cells in hive`);
+        }
+      }
+    } catch {
+      // Hive not available, continue
+    }
   } catch {
-    return false;
+    // Project detection failed, use fallback
+    lowConfidence = true;
+    reasons.push("Could not detect project, using fallback");
   }
+
+  // Determine overall confidence
+  let confidence: "high" | "medium" | "low" | "none";
+  if (highConfidence) {
+    confidence = "high";
+  } else if (mediumConfidence) {
+    confidence = "medium";
+  } else if (lowConfidence) {
+    confidence = "low";
+  } else {
+    confidence = "none";
+  }
+
+  return {
+    detected: confidence !== "none",
+    confidence,
+    reasons,
+  };
 }
+
+// ============================================================================
+// Hook Registration
+// ============================================================================
 
 /**
  * Create the compaction hook for use in plugin registration
  *
- * Only injects swarm context if there's an active swarm (in-progress beads).
- * This keeps the coordinator cooking after compaction.
+ * Injects swarm context based on detection confidence:
+ * - HIGH/MEDIUM: Full swarm context (definitely/probably a swarm)
+ * - LOW: Fallback detection prompt (let compactor check context)
+ * - NONE: No injection (probably not a swarm)
+ *
+ * Philosophy: Err on the side of continuation. A false positive costs
+ * a bit of context space. A false negative loses the swarm.
  *
  * @example
  * ```typescript
@@ -153,9 +299,17 @@ export function createCompactionHook() {
     _input: { sessionID: string },
     output: { context: string[] },
   ): Promise<void> => {
-    const hasSign = await hasSwarmSign();
-    if (hasSign) {
-      output.context.push(SWARM_COMPACTION_CONTEXT);
+    const detection = await detectSwarm();
+
+    if (detection.confidence === "high" || detection.confidence === "medium") {
+      // Definite or probable swarm - inject full context
+      const header = `[Swarm detected: ${detection.reasons.join(", ")}]\n\n`;
+      output.context.push(header + SWARM_COMPACTION_CONTEXT);
+    } else if (detection.confidence === "low") {
+      // Possible swarm - inject fallback detection prompt
+      const header = `[Possible swarm: ${detection.reasons.join(", ")}]\n\n`;
+      output.context.push(header + SWARM_DETECTION_FALLBACK);
     }
+    // confidence === "none" - no injection, probably not a swarm
   };
 }

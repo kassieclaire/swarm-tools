@@ -214,31 +214,13 @@ const toolCheckers: Record<ToolName, () => Promise<ToolStatus>> = {
   },
 
   // DEPRECATED: Use hive instead
-  // Kept for backward compatibility only
+  // bd CLI is deprecated - always return false, use HiveAdapter instead
   beads: async () => {
-    const exists = await commandExists("bd");
-    if (!exists) {
-      return {
-        available: false,
-        checkedAt: new Date().toISOString(),
-        error: "bd command not found",
-      };
-    }
-
-    try {
-      // Just check if bd can run - don't require a repo
-      const result = await Bun.$`bd --version`.quiet().nothrow();
-      return {
-        available: result.exitCode === 0,
-        checkedAt: new Date().toISOString(),
-      };
-    } catch (e) {
-      return {
-        available: false,
-        checkedAt: new Date().toISOString(),
-        error: String(e),
-      };
-    }
+    return {
+      available: false,
+      checkedAt: new Date().toISOString(),
+      error: "bd CLI is deprecated - use hive_* tools with HiveAdapter instead",
+    };
   },
 
   "swarm-mail": async () => {

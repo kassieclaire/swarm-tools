@@ -1572,7 +1572,13 @@ describe("3-Strike Detection", () => {
         "Failed 1",
         storage,
       );
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Capture the timestamps from first strike
+      const firstStrikeAt = record1.first_strike_at;
+      const firstLastStrikeAt = record1.last_strike_at;
+      
+      // Wait to ensure different timestamp
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      
       const record2 = await addStrike(
         "test-bead-4",
         "Fix 2",
@@ -1580,8 +1586,10 @@ describe("3-Strike Detection", () => {
         storage,
       );
 
-      expect(record2.first_strike_at).toBe(record1.first_strike_at);
-      expect(record2.last_strike_at).not.toBe(record1.last_strike_at);
+      // first_strike_at should be preserved from first call
+      expect(record2.first_strike_at).toBe(firstStrikeAt);
+      // last_strike_at should be updated (different from first call's last_strike_at)
+      expect(record2.last_strike_at).not.toBe(firstLastStrikeAt);
     });
   });
 
