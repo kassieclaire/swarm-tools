@@ -367,6 +367,51 @@ This repo uses **Changesets** for versioning and **npm Trusted Publishers** (OID
 5. Changesets action creates a "chore: release packages" PR with version bumps
 6. Merge that PR → automatically publishes to npm via OIDC
 
+### Changeset Lore (REQUIRED)
+
+**Pack changesets with lore.** Changesets are not just version bumps - they're the story of the release. They get read by humans deciding whether to upgrade.
+
+**Good changeset:**
+```markdown
+---
+"swarm-mail": minor
+---
+
+## 🐝 Cell IDs Now Wear Their Project Colors
+
+Cell IDs finally know where they came from. Instead of anonymous `bd-xxx` prefixes,
+new cells proudly display their project name: `swarm-mail-lf2p4u-abc123`.
+
+**What changed:**
+- `generateBeadId()` reads `package.json` name field
+- Slugifies project name (lowercase, dashes for special chars)
+- Falls back to `cell-` prefix if no package.json
+
+**Why it matters:**
+- Cells identifiable at a glance in multi-project workspaces
+- Easier filtering/searching across projects
+- Removes legacy "bead" terminology from user-facing IDs
+
+**Backward compatible:** Existing `bd-*` IDs still work fine.
+```
+
+**Bad changeset:**
+```markdown
+---
+"swarm-mail": patch
+---
+
+Updated ID generation
+```
+
+**Rules:**
+- Use emoji sparingly but effectively (🐝 for hive/swarm features)
+- Explain WHAT changed, WHY it matters, and any MIGRATION notes
+- Include code examples if API changed
+- Mention backward compatibility explicitly
+- Make it scannable (headers, bullets, bold for key points)
+- **Pull a quote from pdf-brain** - Search for something thematically relevant and add it as an epigraph. Makes changelogs memorable and connects our work to the broader craft.
+
 ### Ignored Packages
 
 The following packages are excluded from changesets (won't be published):
