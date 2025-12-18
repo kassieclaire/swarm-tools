@@ -26,6 +26,12 @@
  * - `AgentProgressSchema` - Individual agent status
  * - `SpawnedAgentSchema` - Spawned agent metadata
  *
+ * ## Worker Handoff Schemas (Swarm Contracts)
+ * - `WorkerHandoffSchema` - Complete structured handoff contract
+ * - `WorkerHandoffContractSchema` - Task contract (files, criteria)
+ * - `WorkerHandoffContextSchema` - Narrative context (epic summary, role)
+ * - `WorkerHandoffEscalationSchema` - Escalation protocols
+ *
  * @module schemas
  */
 
@@ -167,6 +173,18 @@ export {
   type UpdateSwarmContextArgs,
   type QuerySwarmContextsArgs,
 } from "./swarm-context";
+
+// Worker handoff schemas
+export {
+  WorkerHandoffContractSchema,
+  WorkerHandoffContextSchema,
+  WorkerHandoffEscalationSchema,
+  WorkerHandoffSchema,
+  type WorkerHandoff,
+  type WorkerHandoffContract,
+  type WorkerHandoffContext,
+  type WorkerHandoffEscalation,
+} from "./worker-handoff";
 
 // Cell event schemas (PRIMARY)
 export {

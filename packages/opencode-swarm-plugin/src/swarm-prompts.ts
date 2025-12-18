@@ -13,6 +13,7 @@
  */
 
 import { tool } from "@opencode-ai/plugin";
+import { generateWorkerHandoff } from "./swarm-orchestrate";
 
 // ============================================================================
 // Prompt Templates
@@ -591,6 +592,26 @@ export function formatSubtaskPromptV2(params: {
     }
   }
 
+  // Generate WorkerHandoff contract (machine-readable section)
+  const handoff = generateWorkerHandoff({
+    task_id: params.bead_id,
+    files_owned: params.files,
+    files_readonly: [],
+    dependencies_completed: [],
+    success_criteria: [
+      "All files compile without errors",
+      "Tests pass for modified code",
+      "Code follows project patterns",
+    ],
+    epic_summary: params.subtask_description || params.subtask_title,
+    your_role: params.subtask_title,
+    what_others_did: params.recovery_context?.shared_context || "",
+    what_comes_next: "",
+  });
+
+  const handoffJson = JSON.stringify(handoff, null, 2);
+  const handoffSection = `\n## WorkerHandoff Contract\n\nThis is your machine-readable contract. The contract IS the instruction.\n\n\`\`\`json\n${handoffJson}\n\`\`\`\n`;
+
   return SUBTASK_PROMPT_V2.replace(/{bead_id}/g, params.bead_id)
     .replace(/{epic_id}/g, params.epic_id)
     .replace(/{project_path}/g, params.project_path || "$PWD")
@@ -602,7 +623,7 @@ export function formatSubtaskPromptV2(params: {
     .replace("{file_list}", fileList)
     .replace("{shared_context}", params.shared_context || "(none)")
     .replace("{compressed_context}", compressedSection)
-    .replace("{error_context}", errorSection + recoverySection);
+    .replace("{error_context}", errorSection + recoverySection + handoffSection);
 }
 
 /**

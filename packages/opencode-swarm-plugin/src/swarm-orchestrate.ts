@@ -21,6 +21,7 @@
 
 import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
+import { minimatch } from "minimatch";
 import {
   type AgentProgress,
   AgentProgressSchema,
@@ -32,6 +33,10 @@ import {
   type SwarmStatus,
   SwarmStatusSchema,
 } from "./schemas";
+import {
+  type WorkerHandoff,
+  WorkerHandoffSchema,
+} from "./schemas/worker-handoff";
 import {
   getSwarmInbox,
   releaseSwarmFiles,
@@ -81,6 +86,182 @@ import {
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/**
+ * Generate a WorkerHandoff object from subtask parameters
+ *
+ * Creates a machine-readable contract that replaces prose instructions in SUBTASK_PROMPT_V2.
+ * Workers receive typed handoffs with explicit files, criteria, and escalation paths.
+ *
+ * @param params - Subtask parameters
+ * @returns WorkerHandoff object validated against schema
+ */
+export function generateWorkerHandoff(params: {
+  task_id: string;
+  files_owned: string[];
+  files_readonly?: string[];
+  dependencies_completed?: string[];
+  success_criteria?: string[];
+  epic_summary: string;
+  your_role: string;
+  what_others_did?: string;
+  what_comes_next?: string;
+}): WorkerHandoff {
+  const handoff: WorkerHandoff = {
+    contract: {
+      task_id: params.task_id,
+      files_owned: params.files_owned,
+      files_readonly: params.files_readonly || [],
+      dependencies_completed: params.dependencies_completed || [],
+      success_criteria: params.success_criteria || [
+        "All files compile without errors",
+        "Tests pass for modified code",
+        "Code follows project patterns",
+      ],
+    },
+    context: {
+      epic_summary: params.epic_summary,
+      your_role: params.your_role,
+      what_others_did: params.what_others_did || "",
+      what_comes_next: params.what_comes_next || "",
+    },
+    escalation: {
+      blocked_contact: "coordinator",
+      scope_change_protocol:
+        "Send swarmmail_send(to=['coordinator'], subject='Scope change request: <task_id>', importance='high') and wait for approval before expanding beyond files_owned",
+    },
+  };
+
+  // Validate against schema
+  return WorkerHandoffSchema.parse(handoff);
+}
+
+/**
+ * Validate that files_touched is a subset of files_owned (supports globs)
+ *
+ * Checks contract compliance - workers should only modify files they own.
+ * Glob patterns in files_owned are matched against files_touched paths.
+ *
+ * @param files_touched - Actual files modified by the worker
+ * @param files_owned - Files the worker is allowed to modify (may include globs)
+ * @returns Validation result with violations list
+ *
+ * @example
+ * ```typescript
+ * // Exact match - passes
+ * validateContract(["src/a.ts"], ["src/a.ts", "src/b.ts"])
+ * // => { valid: true, violations: [] }
+ *
+ * // Glob match - passes
+ * validateContract(["src/auth/service.ts"], ["src/auth/**"])
+ * // => { valid: true, violations: [] }
+ *
+ * // Violation - fails
+ * validateContract(["src/other.ts"], ["src/auth/**"])
+ * // => { valid: false, violations: ["src/other.ts"] }
+ * ```
+ */
+export function validateContract(
+  files_touched: string[],
+  files_owned: string[]
+): { valid: boolean; violations: string[] } {
+  // Empty files_touched is valid (read-only work)
+  if (files_touched.length === 0) {
+    return { valid: true, violations: [] };
+  }
+
+  const violations: string[] = [];
+
+  for (const touchedFile of files_touched) {
+    let matched = false;
+
+    for (const ownedPattern of files_owned) {
+      // Check if pattern is a glob or exact match
+      if (ownedPattern.includes("*") || ownedPattern.includes("?")) {
+        // Glob pattern - use minimatch
+        if (minimatch(touchedFile, ownedPattern)) {
+          matched = true;
+          break;
+        }
+      } else {
+        // Exact match
+        if (touchedFile === ownedPattern) {
+          matched = true;
+          break;
+        }
+      }
+    }
+
+    if (!matched) {
+      violations.push(touchedFile);
+    }
+  }
+
+  return {
+    valid: violations.length === 0,
+    violations,
+  };
+}
+
+/**
+ * Get files_owned for a subtask from DecompositionGeneratedEvent
+ *
+ * Queries the event log for the decomposition that created this epic,
+ * then extracts the files array for the matching subtask.
+ *
+ * @param projectKey - Project path
+ * @param epicId - Epic ID
+ * @param subtaskId - Subtask cell ID  
+ * @returns Array of file patterns this subtask owns, or null if not found
+ */
+async function getSubtaskFilesOwned(
+  projectKey: string,
+  epicId: string,
+  subtaskId: string
+): Promise<string[] | null> {
+  try {
+    // Import readEvents from swarm-mail
+    const { readEvents } = await import("swarm-mail");
+    
+    // Query for decomposition_generated events for this epic
+    const events = await readEvents({
+      projectKey,
+      types: ["decomposition_generated"],
+    }, projectKey);
+    
+    // Find the event for this epic
+    const decompositionEvent = events.find((e: any) => 
+      e.type === "decomposition_generated" && e.epic_id === epicId
+    );
+    
+    if (!decompositionEvent) {
+      console.warn(`[swarm_complete] No decomposition event found for epic ${epicId}`);
+      return null;
+    }
+    
+    // Extract subtask index from subtask ID (e.g., "bd-abc123.0" -> 0)
+    // Subtask IDs follow pattern: epicId.index
+    const subtaskMatch = subtaskId.match(/\.(\d+)$/);
+    if (!subtaskMatch) {
+      console.warn(`[swarm_complete] Could not parse subtask index from ${subtaskId}`);
+      return null;
+    }
+    
+    const subtaskIndex = parseInt(subtaskMatch[1], 10);
+    const subtasks = (decompositionEvent as any).subtasks || [];
+    
+    if (subtaskIndex >= subtasks.length) {
+      console.warn(`[swarm_complete] Subtask index ${subtaskIndex} out of range (${subtasks.length} subtasks)`);
+      return null;
+    }
+    
+    const subtask = subtasks[subtaskIndex];
+    return subtask.files || [];
+  } catch (error) {
+    console.error(`[swarm_complete] Failed to query subtask files:`, error);
+    return null;
+  }
+}
 
 /**
  * Query beads for subtasks of an epic using HiveAdapter (not bd CLI)
@@ -1286,6 +1467,48 @@ Continuing with completion, but this should be fixed for future subtasks.`;
         }
       }
 
+      // Contract Validation - check files_touched against WorkerHandoff contract
+      let contractValidation: { valid: boolean; violations: string[] } | null = null;
+      let contractWarning: string | undefined;
+
+      if (args.files_touched && args.files_touched.length > 0) {
+        // Extract epic ID from subtask ID
+        const isSubtask = args.bead_id.includes(".");
+        
+        if (isSubtask) {
+          const epicId = args.bead_id.split(".")[0];
+          
+          // Query decomposition event for files_owned
+          const filesOwned = await getSubtaskFilesOwned(
+            args.project_key,
+            epicId,
+            args.bead_id
+          );
+          
+          if (filesOwned) {
+            contractValidation = validateContract(args.files_touched, filesOwned);
+            
+            if (!contractValidation.valid) {
+              // Contract violation - log warning (don't block completion)
+              contractWarning = `⚠️  CONTRACT VIOLATION: Modified files outside owned scope
+              
+**Files owned**: ${filesOwned.join(", ")}
+**Files touched**: ${args.files_touched.join(", ")}
+**Violations**: ${contractValidation.violations.join(", ")}
+
+This indicates scope creep - the worker modified files they weren't assigned.
+This will be recorded as a negative learning signal.`;
+
+              console.warn(`[swarm_complete] ${contractWarning}`);
+            } else {
+              console.log(`[swarm_complete] Contract validation passed: all ${args.files_touched.length} files within owned scope`);
+            }
+          } else {
+            console.warn(`[swarm_complete] Could not retrieve files_owned for contract validation - skipping`);
+          }
+        }
+      }
+
       // Parse and validate evaluation if provided
       let parsedEvaluation: Evaluation | undefined;
       if (args.evaluation) {
@@ -1367,6 +1590,8 @@ Continuing with completion, but this should be fixed for future subtasks.`;
           error_count: args.error_count || 0,
           retry_count: args.retry_count || 0,
           success: true,
+          scope_violation: contractValidation ? !contractValidation.valid : undefined,
+          violation_files: contractValidation?.violations,
         });
         await appendEvent(event, args.project_key);
       } catch (error) {
@@ -1544,6 +1769,21 @@ Files touched: ${args.files_touched?.join(", ") || "none recorded"}`,
             ? "Learning automatically stored in semantic-memory"
             : `Failed to store: ${memoryError}. Learning lost unless semantic-memory is available.`,
         },
+        // Contract validation result
+        contract_validation: contractValidation
+          ? {
+              validated: true,
+              passed: contractValidation.valid,
+              violations: contractValidation.violations,
+              warning: contractWarning,
+              note: contractValidation.valid
+                ? "All files within owned scope"
+                : "Scope violation detected - recorded as negative learning signal",
+            }
+          : {
+              validated: false,
+              reason: "No files_owned contract found (non-epic subtask or decomposition event missing)",
+            },
       };
 
       return JSON.stringify(response, null, 2);

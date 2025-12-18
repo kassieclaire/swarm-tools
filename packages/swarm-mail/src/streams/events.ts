@@ -178,6 +178,10 @@ export const SubtaskOutcomeEventSchema = BaseEventSchema.extend({
   error_count: z.number().min(0).default(0),
   retry_count: z.number().min(0).default(0),
   success: z.boolean(),
+  /** Contract violation - files touched outside owned scope */
+  scope_violation: z.boolean().optional(),
+  /** Files that violated the contract */
+  violation_files: z.array(z.string()).optional(),
 });
 
 export const HumanFeedbackEventSchema = BaseEventSchema.extend({
