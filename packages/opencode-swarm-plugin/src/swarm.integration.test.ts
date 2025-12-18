@@ -24,6 +24,7 @@ import {
   swarm_checkpoint,
   swarm_recover,
 } from "./swarm";
+import { swarm_review, swarm_review_feedback } from "./swarm-review";
 import { mcpCall, setState, clearState, AGENT_MAIL_URL } from "./agent-mail";
 
 // ============================================================================
@@ -2199,6 +2200,145 @@ describe("Contract Validation", () => {
       
       const parsed = JSON.parse(result);
       expect(parsed.success).toBe(true);
+    });
+  });
+
+  describe("swarm_complete review gate UX", () => {
+    it("returns success: true with status: pending_review when review not attempted", async () => {
+      const testProjectPath = "/tmp/swarm-review-gate-test-" + Date.now();
+      const { getHiveAdapter } = await import("./hive");
+      const adapter = await getHiveAdapter(testProjectPath);
+
+      // Create a task cell directly
+      const cell = await adapter.createCell(testProjectPath, {
+        title: "Test task for review gate",
+        type: "task",
+        priority: 2,
+      });
+
+      // Start the task
+      await adapter.updateCell(testProjectPath, cell.id, {
+        status: "in_progress",
+      });
+
+      // Try to complete without review (skip_review intentionally omitted - defaults to false)
+      const result = await swarm_complete.execute(
+        {
+          project_key: testProjectPath,
+          agent_name: "TestAgent",
+          bead_id: cell.id,
+          summary: "Done",
+          files_touched: ["test.ts"],
+          skip_verification: true,
+          // skip_review intentionally omitted - defaults to false
+        },
+        mockContext,
+      );
+
+      const parsed = JSON.parse(result);
+
+      // Should be success: true with workflow status
+      expect(parsed.success).toBe(true);
+      expect(parsed.status).toBe("pending_review");
+      expect(parsed.message).toContain("awaiting coordinator review");
+      expect(parsed.next_steps).toBeInstanceOf(Array);
+      expect(parsed.next_steps.length).toBeGreaterThan(0);
+      expect(parsed.review_status).toBeDefined();
+      expect(parsed.review_status.reviewed).toBe(false);
+      expect(parsed.review_status.approved).toBe(false);
+
+      // Should NOT have error field
+      expect(parsed.error).toBeUndefined();
+    });
+
+    it("returns success: true, not error, when review not approved", async () => {
+      const testProjectPath = "/tmp/swarm-review-not-approved-test-" + Date.now();
+      const { getHiveAdapter } = await import("./hive");
+      const { markReviewRejected } = await import("./swarm-review");
+      const adapter = await getHiveAdapter(testProjectPath);
+
+      // Create a task cell directly
+      const cell = await adapter.createCell(testProjectPath, {
+        title: "Test task for review not approved",
+        type: "task",
+        priority: 2,
+      });
+
+      // Start the task
+      await adapter.updateCell(testProjectPath, cell.id, {
+        status: "in_progress",
+      });
+
+      // Manually set review status to rejected (approved: false, but reviewed: true)
+      // This simulates the review gate detecting a review was done but not approved
+      markReviewRejected(cell.id);
+
+      // Try to complete with review not approved
+      const result = await swarm_complete.execute(
+        {
+          project_key: testProjectPath,
+          agent_name: "TestAgent",
+          bead_id: cell.id,
+          summary: "Done",
+          files_touched: ["test.ts"],
+          skip_verification: true,
+        },
+        mockContext,
+      );
+
+      const parsed = JSON.parse(result);
+
+      // Should be success: true with workflow status (not error)
+      expect(parsed.success).toBe(true);
+      expect(parsed.status).toBe("needs_changes");
+      expect(parsed.message).toContain("changes requested");
+      expect(parsed.next_steps).toBeInstanceOf(Array);
+      expect(parsed.next_steps.length).toBeGreaterThan(0);
+      expect(parsed.review_status).toBeDefined();
+      expect(parsed.review_status.reviewed).toBe(true);
+      expect(parsed.review_status.approved).toBe(false);
+
+      // Should NOT have error field
+      expect(parsed.error).toBeUndefined();
+    });
+
+    it("completes successfully when skip_review=true", async () => {
+      const testProjectPath = "/tmp/swarm-skip-review-test-" + Date.now();
+      const { getHiveAdapter } = await import("./hive");
+      const adapter = await getHiveAdapter(testProjectPath);
+
+      // Create a task cell directly
+      const cell = await adapter.createCell(testProjectPath, {
+        title: "Test task for skip review",
+        type: "task",
+        priority: 2,
+      });
+
+      // Start the task
+      await adapter.updateCell(testProjectPath, cell.id, {
+        status: "in_progress",
+      });
+
+      // Complete with skip_review
+      const result = await swarm_complete.execute(
+        {
+          project_key: testProjectPath,
+          agent_name: "TestAgent",
+          bead_id: cell.id,
+          summary: "Done",
+          files_touched: ["test.ts"],
+          skip_verification: true,
+          skip_review: true,
+        },
+        mockContext,
+      );
+
+      const parsed = JSON.parse(result);
+
+      // Should complete without review gate
+      expect(parsed.success).toBe(true);
+      expect(parsed.status).toBeUndefined(); // No workflow status when skipping
+      expect(parsed.error).toBeUndefined();
     });
   });
 });

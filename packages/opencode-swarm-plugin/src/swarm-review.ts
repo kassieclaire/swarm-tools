@@ -686,6 +686,13 @@ export function clearReviewStatus(taskId: string): void {
   clearAttempts(taskId);
 }
 
+/**
+ * Mark a task as reviewed but not approved (for testing)
+ */
+export function markReviewRejected(taskId: string): void {
+  reviewStatus.set(taskId, { approved: false, timestamp: Date.now() });
+}
+
 // ============================================================================
 // Exports
 // ============================================================================

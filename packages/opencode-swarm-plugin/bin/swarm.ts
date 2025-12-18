@@ -1379,6 +1379,7 @@ async function setup() {
   let isReinstall = false;
 
   // Check if already configured FIRST
+  p.log.step("Checking existing configuration...");
   const configDir = join(homedir(), ".config", "opencode");
   const pluginDir = join(configDir, "plugin");
   const commandDir = join(configDir, "command");
@@ -1489,6 +1490,8 @@ async function setup() {
     }
     if (action === "reinstall") {
       isReinstall = true;
+      p.log.step("Reinstalling swarm configuration...");
+      p.log.message(dim("  This will check dependencies, sync skills, and update config files"));
     }
     // action === "reinstall" - fall through to full setup
   }
@@ -1619,11 +1622,13 @@ async function setup() {
   }
 
   // Check for .beads → .hive migration
+  p.log.step("Checking for legacy .beads directory...");
   const cwd = process.cwd();
   const migrationCheck = checkBeadsMigrationNeeded(cwd);
   if (migrationCheck.needed) {
-    p.log.step("Legacy .beads directory detected");
-    p.log.message(dim("  Found: " + migrationCheck.beadsPath));
+    p.log.warn("Found legacy .beads directory");
+    p.log.message(dim("  Path: " + migrationCheck.beadsPath));
+    p.log.message(dim("  Will rename to .hive/ and merge history"));
     
     const shouldMigrate = await p.confirm({
       message: "Migrate .beads to .hive? (recommended)",
@@ -1642,17 +1647,23 @@ async function setup() {
       try {
         const result = await migrateBeadsToHive(cwd);
         if (result.migrated) {
-          migrateSpinner.stop("Migration complete");
-          p.log.success("Renamed .beads/ → .hive/");
+          migrateSpinner.stop("Renamed .beads/ → .hive/");
+          p.log.success("Directory migration complete");
           
           // Merge historic beads into issues.jsonl
+          migrateSpinner.start("Merging historic cells...");
           const mergeResult = await mergeHistoricBeads(cwd);
           if (mergeResult.merged > 0) {
-            p.log.success(`Merged ${mergeResult.merged} historic beads (${mergeResult.skipped} already present)`);
+            migrateSpinner.stop("Historic cells merged");
+            p.log.success(`Merged ${mergeResult.merged} cells (${mergeResult.skipped} already present)`);
+          } else {
+            migrateSpinner.stop("No historic cells to merge");
           }
           
           // Import JSONL into PGLite database
+          migrateSpinner.start("Importing to database...");
           const importResult = await importJsonlToPGLite(cwd);
+          migrateSpinner.stop("Database import complete");
           if (importResult.imported > 0 || importResult.updated > 0) {
             p.log.success(`Database: ${importResult.imported} imported, ${importResult.updated} updated`);
           }
@@ -1667,19 +1678,23 @@ async function setup() {
     } else {
       p.log.warn("Skipping migration - .beads will continue to work but is deprecated");
     }
+  } else {
+    p.log.message(dim("  No legacy .beads directory found"));
   }
 
   // Check for legacy semantic-memory migration
+  p.log.step("Checking for legacy semantic-memory database...");
   if (legacyDatabaseExists()) {
-    p.log.step("Legacy semantic-memory detected");
+    p.log.warn("Found legacy semantic-memory database");
     
     const migrationStatus = await getMigrationStatus();
     if (migrationStatus) {
       const { total, withEmbeddings } = migrationStatus;
-      p.log.message(dim(`  Found ${total} memories (${withEmbeddings} with embeddings)`));
+      p.log.message(dim(`  Memories: ${total} total (${withEmbeddings} with embeddings)`));
+      p.log.message(dim(`  Will migrate to swarm-mail unified database`));
       
       const shouldMigrate = await p.confirm({
-        message: "Migrate semantic-memory to swarm-mail? (recommended)",
+        message: "Migrate to swarm-mail database? (recommended)",
         initialValue: true,
       });
 
@@ -1690,11 +1705,12 @@ async function setup() {
 
       if (shouldMigrate) {
         const migrateSpinner = p.spinner();
-        migrateSpinner.start("Migrating semantic-memory...");
+        migrateSpinner.start("Connecting to target database...");
         
         try {
           // Get swarm-mail database for this project
           const targetDb = await getSwarmMail(cwd);
+          migrateSpinner.message("Migrating memories...");
           
           // Run migration with progress updates
           const result = await migrateLegacyMemories({
@@ -1707,10 +1723,10 @@ async function setup() {
             },
           });
           
-          migrateSpinner.stop("Migration complete");
+          migrateSpinner.stop("Semantic memory migration complete");
           
           if (result.migrated > 0) {
-            p.log.success(`Migrated ${result.migrated} memories`);
+            p.log.success(`Migrated ${result.migrated} memories to swarm-mail`);
           }
           if (result.skipped > 0) {
             p.log.message(dim(`  Skipped ${result.skipped} (already exist)`));
@@ -1732,18 +1748,22 @@ async function setup() {
         p.log.warn("Skipping migration - legacy semantic-memory will continue to work but is deprecated");
       }
     }
+  } else {
+    p.log.message(dim("  No legacy semantic-memory database found"));
   }
 
   // Check for legacy semantic-memory MCP server in OpenCode config
+  p.log.step("Checking for legacy MCP servers...");
   const opencodeConfigPath = join(configDir, 'config.json');
   if (existsSync(opencodeConfigPath)) {
     try {
       const opencodeConfig = JSON.parse(readFileSync(opencodeConfigPath, 'utf-8'));
       if (opencodeConfig.mcpServers?.['semantic-memory']) {
-        p.log.step('Legacy semantic-memory MCP server detected');
+        p.log.warn('Found legacy semantic-memory MCP server');
+        p.log.message(dim('  Semantic memory is now embedded in the plugin'));
         
         const removeMcp = await p.confirm({
-          message: 'Remove legacy semantic-memory MCP? (now embedded in plugin)',
+          message: 'Remove from MCP servers config?',
           initialValue: true,
         });
 
@@ -1756,17 +1776,23 @@ async function setup() {
           delete opencodeConfig.mcpServers['semantic-memory'];
           writeFileSync(opencodeConfigPath, JSON.stringify(opencodeConfig, null, 2));
           p.log.success('Removed semantic-memory from MCP servers');
+          p.log.message(dim(`  Updated: ${opencodeConfigPath}`));
         } else {
-          p.log.warn('Keeping legacy MCP - you may see duplicate tools');
+          p.log.warn('Keeping legacy MCP - you may see duplicate semantic-memory tools');
         }
+      } else {
+        p.log.message(dim('  No legacy MCP servers found'));
       }
     } catch (error) {
-      // Silently ignore config parse errors
+      p.log.message(dim('  Could not parse OpenCode config (skipping MCP check)'));
     }
+  } else {
+    p.log.message(dim('  No OpenCode config found (skipping MCP check)'));
   }
 
   // Model selection
-  p.log.step("Configure swarm agents...");
+  p.log.step("Configuring swarm agents...");
+  p.log.message(dim("  Coordinator handles orchestration, worker executes tasks"));
 
   const coordinatorModel = await p.select({
     message: "Select coordinator model (for orchestration/planning):",
@@ -1862,27 +1888,37 @@ async function setup() {
     process.exit(0);
   }
 
+  p.log.success("Selected models:");
+  p.log.message(dim(`  Coordinator: ${coordinatorModel}`));
+  p.log.message(dim(`  Worker: ${workerModel}`));
+
   p.log.step("Setting up OpenCode integration...");
 
   // Track file operation statistics
   const stats: FileStats = { created: 0, updated: 0, unchanged: 0 };
 
   // Create directories if needed
+  p.log.step("Creating configuration directories...");
   const skillsDir = join(configDir, "skills");
   for (const dir of [pluginDir, commandDir, agentDir, swarmAgentDir, skillsDir]) {
     mkdirWithStatus(dir);
   }
 
   // Write plugin and command files
+  p.log.step("Writing configuration files...");
   stats[writeFileWithStatus(pluginPath, getPluginWrapper(), "Plugin")]++;
   stats[writeFileWithStatus(commandPath, SWARM_COMMAND, "Command")]++;
 
   // Write nested agent files (swarm/planner.md, swarm/worker.md)
   // This is the format used by Task(subagent_type="swarm/worker")
+  p.log.step("Writing agent configuration...");
   stats[writeFileWithStatus(plannerAgentPath, getPlannerAgent(coordinatorModel as string), "Planner agent")]++;
   stats[writeFileWithStatus(workerAgentPath, getWorkerAgent(workerModel as string), "Worker agent")]++;
 
   // Clean up legacy flat agent files if they exist
+  if (existsSync(legacyPlannerPath) || existsSync(legacyWorkerPath)) {
+    p.log.step("Cleaning up legacy agent files...");
+  }
   rmWithStatus(legacyPlannerPath, "legacy planner");
   rmWithStatus(legacyWorkerPath, "legacy worker");
 

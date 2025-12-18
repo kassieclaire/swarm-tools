@@ -1290,17 +1290,16 @@ export const swarm_complete = tool({
         if (!reviewStatusResult.reviewed) {
           return JSON.stringify(
             {
-              success: false,
-              error: "Review required before completion",
+              success: true,
+              status: "pending_review",
               review_status: reviewStatusResult,
-              hint: `This task requires coordinator review before completion.
-
-**Next steps:**
-1. Request review with swarm_review(project_key="${args.project_key}", epic_id="${epicId}", task_id="${args.bead_id}", files_touched=[...])
-2. Wait for coordinator to review and approve with swarm_review_feedback
-3. Once approved, call swarm_complete again
-
-Or use skip_review=true to bypass (not recommended for production work).`,
+              message: "Task completed but awaiting coordinator review before finalization.",
+              next_steps: [
+                `Request review with swarm_review(project_key="${args.project_key}", epic_id="${epicId}", task_id="${args.bead_id}", files_touched=[...])`,
+                "Wait for coordinator to review and approve with swarm_review_feedback",
+                "Once approved, call swarm_complete again to finalize",
+                "Or use skip_review=true to bypass (not recommended for production work)",
+              ],
             },
             null,
             2,
@@ -1310,15 +1309,15 @@ Or use skip_review=true to bypass (not recommended for production work).`,
         // Review was attempted but not approved
         return JSON.stringify(
           {
-            success: false,
-            error: "Review not approved",
+            success: true,
+            status: "needs_changes",
             review_status: reviewStatusResult,
-            hint: `Task was reviewed but not approved. ${reviewStatusResult.remaining_attempts} attempt(s) remaining.
-
-**Next steps:**
-1. Address the feedback from the reviewer
-2. Request another review with swarm_review
-3. Once approved, call swarm_complete again`,
+            message: `Task reviewed but changes requested. ${reviewStatusResult.remaining_attempts} attempt(s) remaining.`,
+            next_steps: [
+              "Address the feedback from the reviewer",
+              `Request another review with swarm_review(project_key="${args.project_key}", epic_id="${epicId}", task_id="${args.bead_id}", files_touched=[...])`,
+              "Once approved, call swarm_complete again to finalize",
+            ],
           },
           null,
           2,
