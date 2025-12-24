@@ -1230,9 +1230,18 @@ ${JSON.stringify(snapshot, null, 2)}
 
 Generate a prompt following this structure:
 
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│             🐝  YOU ARE THE COORDINATOR  🐝                 │
+│                                                             │
+│             NOT A WORKER. NOT AN IMPLEMENTER.               │
+│                  YOU ORCHESTRATE.                           │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
 # 🐝 Swarm Continuation - [Epic Title or "Unknown"]
 
-You are resuming coordination of an active swarm that was interrupted by context compaction.
+**NON-NEGOTIABLE: YOU ARE THE COORDINATOR.** You resumed after context compaction.
 
 ## Epic State
 
@@ -1259,15 +1268,29 @@ You are resuming coordination of an active swarm that was interrupted by context
 
 [List 3-5 concrete actions with actual commands, using real IDs from the state]
 
-## Coordinator Reminders
+## 🎯 COORDINATOR MANDATES (NON-NEGOTIABLE)
 
-- **You are the coordinator** - Don't wait for instructions, orchestrate
-- **Monitor actively** - Check messages every ~10 minutes
-- **Unblock aggressively** - Resolve dependencies immediately
-- **Review thoroughly** - 3-strike rule enforced
-- **Ship it** - When all subtasks done, close the epic
+**YOU ARE THE COORDINATOR. NOT A WORKER.**
 
-Keep the prompt concise but actionable. Use actual data from the snapshot, not placeholders.`;
+### ⛔ FORBIDDEN - NEVER do these:
+- ❌ NEVER use \`edit\`, \`write\`, or \`bash\` for implementation - SPAWN A WORKER
+- ❌ NEVER fetch directly with \`repo-crawl_*\`, \`repo-autopsy_*\`, \`webfetch\`, \`fetch_fetch\` - SPAWN A RESEARCHER
+- ❌ NEVER use \`context7_*\` or \`pdf-brain_*\` directly - SPAWN A RESEARCHER
+- ❌ NEVER reserve files - Workers reserve files
+
+### ✅ ALWAYS do these:
+- ✅ ALWAYS check \`swarm_status\` and \`swarmmail_inbox\` first
+- ✅ ALWAYS use \`swarm_spawn_subtask\` for implementation work
+- ✅ ALWAYS use \`swarm_spawn_researcher\` for external data fetching
+- ✅ ALWAYS review worker output with \`swarm_review\` → \`swarm_review_feedback\`
+- ✅ ALWAYS monitor actively - Check messages every ~10 minutes
+- ✅ ALWAYS unblock aggressively - Resolve dependencies immediately
+
+**If you need external data:** Use \`swarm_spawn_researcher\` with a clear research task. The researcher will fetch, summarize, and return findings.
+
+**3-strike rule enforced:** Workers get 3 review attempts. After 3 rejections, escalate to human.
+
+Keep the prompt concise but actionable. Use actual data from the snapshot, not placeholders. Include the ASCII header and ALL coordinator mandates.`;
 
     logCompaction("debug", "generate_compaction_prompt_calling_llm", {
       session_id: snapshot.sessionID,

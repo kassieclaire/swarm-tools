@@ -231,6 +231,39 @@ bun test
 bun run typecheck
 ```
 
+### Evaluation Pipeline
+
+Test decomposition quality and coordinator discipline with **Evalite** (TypeScript-native eval framework):
+
+```bash
+# Run all evals
+bun run eval:run
+
+# Run specific suites
+bun run eval:decomposition    # Task decomposition quality
+bun run eval:coordinator      # Coordinator protocol compliance
+```
+
+**What gets evaluated:**
+
+| Eval Suite | Measures | Data Source |
+|------------|----------|-------------|
+| `swarm-decomposition` | Subtask independence, complexity balance, coverage, clarity | Fixtures + captured real decompositions |
+| `coordinator-session` | Violation count, spawn efficiency, review thoroughness | Real sessions from `~/.config/swarm-tools/sessions/` |
+
+**Data capture locations:**
+- Decomposition inputs/outputs: `.opencode/eval-data.jsonl`
+- Coordinator sessions: `~/.config/swarm-tools/sessions/*.jsonl`
+- Subtask outcomes: swarm-mail database (used for pattern learning)
+
+**Custom scorers:**
+- Subtask independence (0-1): Files don't overlap between subtasks
+- Complexity balance (0-1): Subtasks have similar estimated complexity
+- Coverage completeness (0-1): Required files are covered
+- Instruction clarity (0-1): Descriptions are specific and actionable
+
+See [evals/README.md](./evals/README.md) for scorer details and how to write new evals.
+
 ---
 
 ## CLI

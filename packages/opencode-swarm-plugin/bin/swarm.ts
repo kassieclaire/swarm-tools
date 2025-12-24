@@ -35,6 +35,7 @@ import {
   ensureHiveDirectory,
   getHiveAdapter,
 } from "../src/hive";
+import { formatCoordinatorPrompt } from "../src/swarm-prompts";
 import {
   legacyDatabaseExists,
   migratePGliteToLibSQL,

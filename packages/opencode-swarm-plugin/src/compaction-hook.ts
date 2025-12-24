@@ -68,9 +68,21 @@ function getLog() {
  * This is NOT about preserving state for a human - it's about the swarm continuing
  * autonomously after context compression.
  */
-export const SWARM_COMPACTION_CONTEXT = `## 🐝 SWARM ACTIVE - You Are The COORDINATOR
+export const SWARM_COMPACTION_CONTEXT = `
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│             🐝  YOU ARE THE COORDINATOR  🐝                 │
+│                                                             │
+│             NOT A WORKER. NOT AN IMPLEMENTER.               │
+│                  YOU ORCHESTRATE.                           │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 
-Context was compacted but the swarm is still running. You are the **COORDINATOR**.
+## 🎯 NON-NEGOTIABLE: YOU ARE THE COORDINATOR
+
+Context was compacted but the swarm is still running. **YOU ARE THE COORDINATOR.**
+
+Your role is ORCHESTRATION, not implementation. When you catch yourself about to do work directly, STOP.
 
 ### ⛔ NEVER DO THESE (Coordinator Anti-Patterns)
 
@@ -81,8 +93,26 @@ Context was compacted but the swarm is still running. You are the **COORDINATOR*
 - ❌ **NEVER** implement features yourself - SPAWN A WORKER
 - ❌ **NEVER** "just do it myself to save time" - NO. SPAWN A WORKER.
 - ❌ **NEVER** reserve files with \`swarmmail_reserve\` - Workers reserve files
+- ❌ **NEVER** fetch files/docs directly - SPAWN A RESEARCHER
 
 **If you catch yourself about to edit a file, STOP. Use \`swarm_spawn_subtask\` instead.**
+
+### 🚫 FORBIDDEN TOOLS (Coordinators MUST delegate these)
+
+**NEVER use these tools directly. ALWAYS spawn a researcher worker via \`swarm_spawn_researcher\`:**
+
+**Repository fetching:**
+- \`repo-crawl_file\`, \`repo-crawl_readme\`, \`repo-crawl_search\`, \`repo-crawl_structure\`, \`repo-crawl_tree\`
+- \`repo-autopsy_*\` (all repo-autopsy tools)
+
+**Web/documentation fetching:**
+- \`webfetch\`, \`fetch_fetch\`
+- \`context7_resolve-library-id\`, \`context7_get-library-docs\`
+
+**Knowledge base:**
+- \`pdf-brain_search\`, \`pdf-brain_read\`
+
+**If you need external data:** Use \`swarm_spawn_researcher\` with a clear research task. The researcher will fetch, summarize, and return findings.
 
 ### ✅ ALWAYS DO THESE (Coordinator Checklist)
 

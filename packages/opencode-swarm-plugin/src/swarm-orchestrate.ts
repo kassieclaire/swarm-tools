@@ -83,7 +83,8 @@ import {
   isReviewApproved,
   getReviewStatus,
 } from "./swarm-review";
-import { captureCoordinatorEvent } from "./eval-capture.js";
+import { captureCoordinatorEvent, type EvalRecord } from "./eval-capture.js";
+import { formatResearcherPrompt } from "./swarm-prompts";
 
 // ============================================================================
 // Helper Functions
@@ -1710,6 +1711,31 @@ Files touched: ${args.files_touched?.join(", ") || "none recorded"}`,
             },
       };
 
+      // Capture subtask completion outcome for eval data
+      try {
+        const { captureSubtaskOutcome } = await import("./eval-capture.js");
+        const durationMs = args.start_time ? Date.now() - args.start_time : 0;
+        
+        // Determine epic ID: use parent_id if available, otherwise fall back to extracting from bead_id
+        const evalEpicId = cell.parent_id || epicId;
+        
+        captureSubtaskOutcome({
+          epicId: evalEpicId,
+          projectPath: args.project_key,
+          beadId: args.bead_id,
+          title: cell.title,
+          plannedFiles: args.planned_files || [],
+          actualFiles: args.files_touched || [],
+          durationMs,
+          errorCount: args.error_count || 0,
+          retryCount: args.retry_count || 0,
+          success: true,
+        });
+      } catch (error) {
+        // Non-fatal - don't block completion if capture fails
+        console.warn("[swarm_complete] Failed to capture subtask outcome:", error);
+      }
+
       // Capture subtask completion outcome
       try {
         const durationMs = args.start_time ? Date.now() - args.start_time : 0;
@@ -1946,6 +1972,14 @@ export const swarm_record_outcome = tool({
       .string()
       .optional()
       .describe("Detailed failure context (error message, stack trace, etc.)"),
+    project_path: tool.schema
+      .string()
+      .optional()
+      .describe("Project path (for finalizing eval records when all subtasks complete)"),
+    epic_id: tool.schema
+      .string()
+      .optional()
+      .describe("Epic ID (for finalizing eval records when all subtasks complete)"),
   },
   async execute(args) {
     // Build outcome signals
@@ -1979,6 +2013,21 @@ export const swarm_record_outcome = tool({
 
     // Get error patterns from accumulator
     const errorStats = await globalErrorAccumulator.getErrorStats(args.bead_id);
+
+    // Finalize eval record if project_path and epic_id provided
+    let finalizedRecord: EvalRecord | null = null;
+    if (args.project_path && args.epic_id) {
+      try {
+        const { finalizeEvalRecord } = await import("./eval-capture.js");
+        finalizedRecord = finalizeEvalRecord({
+          epicId: args.epic_id,
+          projectPath: args.project_path,
+        });
+      } catch (error) {
+        // Non-fatal - log and continue
+        console.warn("[swarm_record_outcome] Failed to finalize eval record:", error);
+      }
+    }
 
     // Generate feedback events for each criterion
     const criteriaToScore = args.criteria ?? [
@@ -2030,6 +2079,7 @@ export const swarm_record_outcome = tool({
           accumulated_errors: errorStats.total,
           unresolved_errors: errorStats.unresolved,
         },
+        finalized_eval_record: finalizedRecord || undefined,
         note: "Feedback events should be stored for criterion weight calculation. Use learning.ts functions to apply weights.",
       },
       null,
@@ -2088,11 +2138,27 @@ export function extractTechStack(task: string): string[] {
 }
 
 /**
+ * Spawn instruction for a researcher worker
+ */
+export interface ResearchSpawnInstruction {
+  /** Unique ID for this research task */
+  research_id: string;
+  /** Technology being researched */
+  tech: string;
+  /** Full prompt for the researcher agent */
+  prompt: string;
+  /** Agent type for the Task tool */
+  subagent_type: "swarm/researcher";
+}
+
+/**
  * Research result from documentation discovery phase
  */
 export interface ResearchResult {
   /** Technologies identified and researched */
   tech_stack: string[];
+  /** Spawn instructions for researcher workers */
+  spawn_instructions: ResearchSpawnInstruction[];
   /** Summaries keyed by technology name */
   summaries: Record<string, string>;
   /** Semantic-memory IDs where research is stored */
@@ -2154,24 +2220,45 @@ export async function runResearchPhase(
   if (techStack.length === 0) {
     return {
       tech_stack: [],
+      spawn_instructions: [],
       summaries: {},
       memory_ids: [],
     };
   }
 
-  // Step 2: For each technology, spawn a researcher
-  // TODO: Implement researcher spawning using swarm_spawn_researcher
-  // and Task tool. This requires coordination logic that will be
-  // added in a future iteration.
+  // Step 2: Generate spawn instructions for each technology
+  // The coordinator will use these to spawn researcher workers via Task()
+  const spawnInstructions: ResearchSpawnInstruction[] = [];
+  
+  for (const tech of techStack) {
+    // Generate unique research ID
+    const researchId = `research-${tech}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    
+    // Generate researcher prompt
+    const prompt = formatResearcherPrompt({
+      research_id: researchId,
+      epic_id: "standalone-research", // No epic context for standalone research
+      tech_stack: [tech], // Single tech per researcher
+      project_path: projectPath,
+      check_upgrades: options?.checkUpgrades ?? false,
+    });
+    
+    spawnInstructions.push({
+      research_id: researchId,
+      tech,
+      prompt,
+      subagent_type: "swarm/researcher",
+    });
+  }
 
-  // For now, return empty summaries (GREEN phase - make tests pass)
-  // The full implementation will spawn researchers in parallel and
-  // collect their findings.
-
+  // Step 3: Return spawn instructions for coordinator
+  // The coordinator will spawn Task() agents using these instructions
+  // and collect results from swarm mail after completion
   return {
     tech_stack: techStack,
-    summaries: {},
-    memory_ids: [],
+    spawn_instructions: spawnInstructions,
+    summaries: {}, // Will be populated by coordinator after researchers complete
+    memory_ids: [], // Will be populated by coordinator after researchers store in semantic-memory
   };
 }
 

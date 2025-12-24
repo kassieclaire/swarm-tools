@@ -495,6 +495,158 @@ describe("End-to-end research workflow", () => {
 	});
 });
 
+describe("Research spawn instructions (NEW)", () => {
+	let testProjectPath: string;
+
+	beforeEach(() => {
+		testProjectPath = join(tmpdir(), `spawn-test-${Date.now()}`);
+		mkdirSync(testProjectPath, { recursive: true });
+	});
+
+	afterEach(() => {
+		rmSync(testProjectPath, { recursive: true, force: true });
+	});
+
+	test("runResearchPhase generates spawn instructions for each technology", async () => {
+		// Create package.json with dependencies
+		const packageJson = {
+			dependencies: {
+				zod: "^3.22.4",
+				typescript: "^5.3.3",
+			},
+		};
+
+		writeFileSync(
+			join(testProjectPath, "package.json"),
+			JSON.stringify(packageJson, null, 2),
+		);
+
+		// Run research phase
+		const result = await runResearchPhase(
+			"Add Zod validation to TypeScript API",
+			testProjectPath,
+		);
+
+		// Should have spawn_instructions array
+		expect(result.spawn_instructions).toBeDefined();
+		expect(Array.isArray(result.spawn_instructions)).toBe(true);
+
+		// Should have one instruction per technology
+		expect(result.spawn_instructions.length).toBe(result.tech_stack.length);
+
+		// Each instruction should have required fields
+		for (const instruction of result.spawn_instructions) {
+			expect(instruction.research_id).toBeDefined();
+			expect(instruction.research_id).toMatch(/^research-/); // Should start with "research-"
+			expect(instruction.tech).toBeDefined();
+			expect(result.tech_stack).toContain(instruction.tech); // Tech should be from tech_stack
+			expect(instruction.prompt).toBeDefined();
+			expect(typeof instruction.prompt).toBe("string");
+			expect(instruction.prompt.length).toBeGreaterThan(0);
+			expect(instruction.subagent_type).toBe("swarm/researcher");
+		}
+	});
+
+	test("runResearchPhase prompts contain correct technology", async () => {
+		const packageJson = {
+			dependencies: {
+				zod: "^3.22.4",
+			},
+		};
+
+		writeFileSync(
+			join(testProjectPath, "package.json"),
+			JSON.stringify(packageJson, null, 2),
+		);
+
+		const result = await runResearchPhase("Use Zod", testProjectPath);
+
+		// Should have exactly one spawn instruction (one tech)
+		expect(result.spawn_instructions.length).toBe(1);
+
+		const instruction = result.spawn_instructions[0];
+		expect(instruction.tech).toBe("zod");
+		expect(instruction.prompt).toContain("zod");
+		expect(instruction.prompt).toContain(testProjectPath);
+	});
+
+	test("runResearchPhase with multiple technologies generates multiple instructions", async () => {
+		const packageJson = {
+			dependencies: {
+				zod: "^3.22.4",
+				typescript: "^5.3.3",
+				react: "^18.2.0",
+			},
+		};
+
+		writeFileSync(
+			join(testProjectPath, "package.json"),
+			JSON.stringify(packageJson, null, 2),
+		);
+
+		const result = await runResearchPhase(
+			"Build React app with Zod and TypeScript",
+			testProjectPath,
+		);
+
+		// Should extract 3 technologies
+		expect(result.tech_stack.length).toBe(3);
+
+		// Should have 3 spawn instructions
+		expect(result.spawn_instructions.length).toBe(3);
+
+		// Each tech should have one instruction
+		const techs = result.spawn_instructions.map((i) => i.tech);
+		expect(techs).toContain("zod");
+		expect(techs).toContain("typescript");
+		expect(techs).toContain("react");
+
+		// Research IDs should be unique
+		const researchIds = result.spawn_instructions.map((i) => i.research_id);
+		const uniqueIds = new Set(researchIds);
+		expect(uniqueIds.size).toBe(researchIds.length);
+	});
+
+	test("runResearchPhase with empty tech_stack returns empty spawn_instructions", async () => {
+		// Don't create package.json - no dependencies
+
+		const result = await runResearchPhase(
+			"Implement something with FooBarBaz",
+			testProjectPath,
+		);
+
+		// Should have empty tech_stack (no known technologies)
+		expect(result.tech_stack).toEqual([]);
+
+		// Should have empty spawn_instructions
+		expect(result.spawn_instructions).toEqual([]);
+
+		// Other fields should be empty
+		expect(result.summaries).toEqual({});
+		expect(result.memory_ids).toEqual([]);
+	});
+
+	test("spawn instruction prompts include swarmmail_init", async () => {
+		const packageJson = {
+			dependencies: {
+				zod: "^3.22.4",
+			},
+		};
+
+		writeFileSync(
+			join(testProjectPath, "package.json"),
+			JSON.stringify(packageJson, null, 2),
+		);
+
+		const result = await runResearchPhase("Use Zod", testProjectPath);
+
+		// Prompt should include swarmmail_init (researcher workers need this)
+		const instruction = result.spawn_instructions[0];
+		expect(instruction.prompt).toContain("swarmmail_init");
+		expect(instruction.prompt).toContain("semantic-memory_store");
+	});
+});
+
 describe("Real-world fixture: this repo", () => {
 	test("discovers tools and versions from actual repo", async () => {
 		// Use the plugin package directory, not monorepo root
@@ -540,5 +692,10 @@ describe("Real-world fixture: this repo", () => {
 		expect(result.summaries).toBeDefined();
 		expect(result.memory_ids).toBeDefined();
 		expect(Array.isArray(result.memory_ids)).toBe(true);
+
+		// NEW: Should have spawn_instructions
+		expect(result.spawn_instructions).toBeDefined();
+		expect(Array.isArray(result.spawn_instructions)).toBe(true);
+		expect(result.spawn_instructions.length).toBeGreaterThan(0);
 	});
 });

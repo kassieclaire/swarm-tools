@@ -9,8 +9,10 @@ import { describe, expect, test } from "bun:test";
 import {
   formatSubtaskPromptV2,
   formatResearcherPrompt,
+  formatCoordinatorPrompt,
   SUBTASK_PROMPT_V2,
   RESEARCHER_PROMPT,
+  COORDINATOR_PROMPT,
 } from "./swarm-prompts";
 
 describe("SUBTASK_PROMPT_V2", () => {
@@ -816,5 +818,124 @@ describe("swarm_spawn_retry tool", () => {
 
     const parsed = JSON.parse(result);
     expect(parsed.prompt).toMatch(/preserve.*working|fix.*while preserving/i);
+  });
+});
+
+describe("COORDINATOR_PROMPT", () => {
+  test("constant exists and is exported", () => {
+    expect(COORDINATOR_PROMPT).toBeDefined();
+    expect(typeof COORDINATOR_PROMPT).toBe("string");
+    expect(COORDINATOR_PROMPT.length).toBeGreaterThan(100);
+  });
+
+  test("contains all phase headers (0-8)", () => {
+    expect(COORDINATOR_PROMPT).toContain("Phase 0:");
+    expect(COORDINATOR_PROMPT).toContain("Phase 1:");
+    expect(COORDINATOR_PROMPT).toContain("Phase 2:");
+    expect(COORDINATOR_PROMPT).toContain("Phase 3:");
+    expect(COORDINATOR_PROMPT).toContain("Phase 4:");
+    expect(COORDINATOR_PROMPT).toContain("Phase 5:");
+    expect(COORDINATOR_PROMPT).toContain("Phase 6:");
+    expect(COORDINATOR_PROMPT).toContain("Phase 7:");
+    expect(COORDINATOR_PROMPT).toContain("Phase 8:");
+  });
+
+  test("contains Phase 1.5: Research Phase section", () => {
+    expect(COORDINATOR_PROMPT).toContain("Phase 1.5:");
+    expect(COORDINATOR_PROMPT).toMatch(/Phase 1\.5:.*Research/i);
+  });
+
+  test("Phase 1.5 documents swarm_spawn_researcher usage", () => {
+    // Extract Phase 1.5 section
+    const phase15Match = COORDINATOR_PROMPT.match(/Phase 1\.5:[\s\S]*?Phase 2:/);
+    expect(phase15Match).not.toBeNull();
+    if (!phase15Match) return;
+    const phase15Content = phase15Match[0];
+
+    expect(phase15Content).toContain("swarm_spawn_researcher");
+    expect(phase15Content).toContain("Task(subagent_type=\"swarm/researcher\"");
+  });
+
+  test("has section explicitly forbidding direct research tool calls", () => {
+    expect(COORDINATOR_PROMPT).toMatch(/NEVER.*direct|forbidden.*tools|do not call directly/i);
+  });
+
+  test("forbidden tools section lists all prohibited tools", () => {
+    const forbiddenTools = [
+      "repo-crawl_",
+      "repo-autopsy_",
+      "webfetch",
+      "fetch_fetch",
+      "context7_",
+      "pdf-brain_search",
+      "pdf-brain_read"
+    ];
+
+    for (const tool of forbiddenTools) {
+      expect(COORDINATOR_PROMPT).toContain(tool);
+    }
+  });
+
+  test("forbidden tools section explains to use swarm_spawn_researcher instead", () => {
+    // Find the forbidden tools section
+    const forbiddenMatch = COORDINATOR_PROMPT.match(/(FORBIDDEN.*for coordinators|NEVER.*FETCH.*DIRECTLY)[\s\S]{0,500}swarm_spawn_researcher/i);
+    expect(forbiddenMatch).not.toBeNull();
+  });
+
+  test("contains coordinator role boundaries section", () => {
+    expect(COORDINATOR_PROMPT).toContain("Coordinator Role Boundaries");
+    expect(COORDINATOR_PROMPT).toMatch(/COORDINATORS NEVER.*EXECUTE.*WORK/i);
+  });
+
+  test("contains MANDATORY review loop section", () => {
+    expect(COORDINATOR_PROMPT).toContain("MANDATORY Review Loop");
+    expect(COORDINATOR_PROMPT).toContain("swarm_review");
+    expect(COORDINATOR_PROMPT).toContain("swarm_review_feedback");
+  });
+
+  test("Phase 1.5 positioned between Phase 1 (Initialize) and Phase 2 (Knowledge)", () => {
+    const phase1Pos = COORDINATOR_PROMPT.indexOf("Phase 1:");
+    const phase15Pos = COORDINATOR_PROMPT.indexOf("Phase 1.5:");
+    const phase2Pos = COORDINATOR_PROMPT.indexOf("Phase 2:");
+
+    expect(phase15Pos).toBeGreaterThan(phase1Pos);
+    expect(phase15Pos).toBeLessThan(phase2Pos);
+  });
+});
+
+describe("formatCoordinatorPrompt", () => {
+  test("function exists and returns string", () => {
+    expect(formatCoordinatorPrompt).toBeDefined();
+    const result = formatCoordinatorPrompt({ task: "test task", projectPath: "/test" });
+    expect(typeof result).toBe("string");
+  });
+
+  test("substitutes {task} placeholder", () => {
+    const result = formatCoordinatorPrompt({ 
+      task: "Implement auth", 
+      projectPath: "/test" 
+    });
+    expect(result).toContain("Implement auth");
+  });
+
+  test("substitutes {project_path} placeholder", () => {
+    const result = formatCoordinatorPrompt({ 
+      task: "test", 
+      projectPath: "/Users/joel/my-project" 
+    });
+    expect(result).toContain("/Users/joel/my-project");
+  });
+
+  test("returns complete prompt with all phases", () => {
+    const result = formatCoordinatorPrompt({ 
+      task: "test", 
+      projectPath: "/test" 
+    });
+    
+    // Should contain all phase headers
+    for (let i = 0; i <= 8; i++) {
+      expect(result).toContain(`Phase ${i}:`);
+    }
+    expect(result).toContain("Phase 1.5:");
   });
 });

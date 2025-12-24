@@ -5,14 +5,12 @@ TypeScript-native evaluation framework for testing swarm task decomposition qual
 ## Quick Start
 
 ```bash
-# Watch mode for development
-pnpm eval:dev
-
 # Run all evals once
-pnpm eval:run
+bun run eval:run
 
-# CI mode with 80% threshold
-pnpm eval:ci
+# Run specific eval suite
+bun run eval:decomposition
+bun run eval:coordinator
 ```
 
 ## Structure
@@ -134,13 +132,32 @@ Scores coordinator discipline during swarm sessions.
 bunx evalite run evals/coordinator-session.eval.ts
 ```
 
-## Data Loaders
+## Data Capture
 
-### lib/data-loader.ts
+### What Gets Captured
 
-Loads eval data from multiple sources:
+**Decomposition Eval Data:**
+- Task input (user's original request)
+- Generated CellTree JSON (epic + subtasks)
+- Timestamp and context
+- Stored in: `.opencode/eval-data.jsonl`
 
-- `loadEvalCases()` - PGlite eval_records table
+**Coordinator Session Data:**
+- Real swarm sessions captured during `/swarm` runs
+- Includes: decomposition, spawn events, reviews, violations
+- Stored in: `~/.config/swarm-tools/sessions/*.jsonl`
+
+**Subtask Outcome Data:**
+- Duration, success/failure, error count, retry count
+- Files touched, strategy used
+- Used for learning and pattern maturity
+- Stored in: swarm-mail database (libSQL)
+
+### Data Loaders
+
+**lib/data-loader.ts** provides utilities to load eval data:
+
+- `loadEvalCases()` - Load eval records from swarm-mail database
 - `loadCapturedSessions()` - Real coordinator sessions from `~/.config/swarm-tools/sessions/`
 - `hasRealEvalData()` - Check if enough real data exists
 - `getEvalDataSummary()` - Stats about available eval data

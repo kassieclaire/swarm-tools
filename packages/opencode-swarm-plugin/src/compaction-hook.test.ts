@@ -64,7 +64,7 @@ describe("Compaction Hook", () => {
   describe("SWARM_COMPACTION_CONTEXT", () => {
     it("contains coordinator instructions", () => {
       expect(SWARM_COMPACTION_CONTEXT).toContain("COORDINATOR");
-      expect(SWARM_COMPACTION_CONTEXT).toContain("You Are The COORDINATOR");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("YOU ARE THE COORDINATOR");
     });
 
     it("contains prohibition-first anti-patterns", () => {
@@ -136,12 +136,107 @@ describe("Compaction Hook", () => {
     it("HIGH confidence triggers full context", async () => {
       // This would need proper mocking of active reservations
       // For now, just verify the context strings exist
-      expect(SWARM_COMPACTION_CONTEXT).toContain("SWARM ACTIVE");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("YOU ARE THE COORDINATOR");
     });
 
     it("LOW confidence triggers fallback prompt", async () => {
       expect(SWARM_DETECTION_FALLBACK).toContain("Swarm Detection");
       expect(SWARM_DETECTION_FALLBACK).toContain("Check Your Context");
+    });
+  });
+
+  describe("Forbidden tools anti-pattern (TDD red phase)", () => {
+    it("SWARM_COMPACTION_CONTEXT includes 'NEVER fetch directly' rule", () => {
+      // Should warn against direct fetching
+      expect(SWARM_COMPACTION_CONTEXT).toContain("NEVER");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("repo-crawl");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("webfetch");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("fetch_fetch");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("context7");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("pdf-brain");
+    });
+
+    it("SWARM_COMPACTION_CONTEXT instructs to spawn researcher instead", () => {
+      expect(SWARM_COMPACTION_CONTEXT).toContain("SPAWN A RESEARCHER");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("swarm_spawn_researcher");
+    });
+
+    it("lists all forbidden repo-crawl tools", () => {
+      const forbiddenTools = [
+        "repo-crawl_file",
+        "repo-crawl_readme", 
+        "repo-crawl_search",
+        "repo-crawl_structure",
+        "repo-crawl_tree"
+      ];
+      
+      for (const tool of forbiddenTools) {
+        expect(SWARM_COMPACTION_CONTEXT).toContain(tool);
+      }
+    });
+
+    it("lists all forbidden repo-autopsy tools", () => {
+      expect(SWARM_COMPACTION_CONTEXT).toContain("repo-autopsy");
+    });
+
+    it("lists all forbidden context7 tools", () => {
+      const forbiddenTools = [
+        "context7_resolve-library-id",
+        "context7_get-library-docs"
+      ];
+      
+      for (const tool of forbiddenTools) {
+        expect(SWARM_COMPACTION_CONTEXT).toContain(tool);
+      }
+    });
+
+    it("lists all forbidden pdf-brain tools", () => {
+      const forbiddenTools = [
+        "pdf-brain_search",
+        "pdf-brain_read"
+      ];
+      
+      for (const tool of forbiddenTools) {
+        expect(SWARM_COMPACTION_CONTEXT).toContain(tool);
+      }
+    });
+  });
+
+  describe("Coordinator identity reinforcement (TDD red phase)", () => {
+    it("includes ASCII header for coordinator identity", () => {
+      // Should have prominent visual indicator
+      expect(SWARM_COMPACTION_CONTEXT).toMatch(/[╔═╗║╚╝]|[┌─┐│└┘]|[█▀▄]/);
+    });
+
+    it("repeats 'YOU ARE THE COORDINATOR' multiple times", () => {
+      const matches = SWARM_COMPACTION_CONTEXT.match(/YOU ARE THE COORDINATOR/gi);
+      expect(matches).toBeDefined();
+      expect(matches!.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("uses strong imperative language NEVER/ALWAYS/NON-NEGOTIABLE", () => {
+      expect(SWARM_COMPACTION_CONTEXT).toContain("NEVER");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("ALWAYS");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("NON-NEGOTIABLE");
+    });
+
+    it("makes role unmistakable with multiple strong statements", () => {
+      // Check for strong coordinator identity statements
+      const identityPatterns = [
+        /YOU ARE THE COORDINATOR/i,
+        /NOT A WORKER/i,
+        /ORCHESTRATE/i,
+        /DO NOT IMPLEMENT/i
+      ];
+
+      let matchCount = 0;
+      for (const pattern of identityPatterns) {
+        if (pattern.test(SWARM_COMPACTION_CONTEXT)) {
+          matchCount++;
+        }
+      }
+
+      expect(matchCount).toBeGreaterThanOrEqual(3);
     });
   });
 

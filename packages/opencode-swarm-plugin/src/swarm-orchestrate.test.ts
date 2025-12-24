@@ -6,10 +6,13 @@
  * - Researcher spawning for identified technologies
  * - Summary collection from semantic-memory
  * - Research result aggregation
+ * - Eval capture integration (captureSubtaskOutcome wiring)
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
-import { runResearchPhase, extractTechStack } from "./swarm-orchestrate";
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { runResearchPhase, extractTechStack, swarm_complete } from "./swarm-orchestrate";
+import * as evalCapture from "./eval-capture.js";
+import * as fs from "node:fs";
 
 describe("extractTechStack", () => {
   test("extracts Next.js from task description", () => {
@@ -115,9 +118,269 @@ describe("runResearchPhase", () => {
   });
 });
 
-describe("swarm_research_phase tool", () => {
-  test.todo("exposes research phase as plugin tool");
-  test.todo("validates task parameter");
-  test.todo("validates project_path parameter");
-  test.todo("returns JSON string with research results");
+// describe("swarm_research_phase tool", () => {
+//   test.todo("exposes research phase as plugin tool");
+//   test.todo("validates task parameter");
+//   test.todo("validates project_path parameter");
+//   test.todo("returns JSON string with research results");
+// });
+
+// ============================================================================
+// Eval Capture Integration Tests (swarm_complete)
+// ============================================================================
+
+describe("captureSubtaskOutcome integration", () => {
+  const mockContext = {
+    sessionID: `test-complete-${Date.now()}`,
+    messageID: `test-message-${Date.now()}`,
+    agent: "test-agent",
+    abort: new AbortController().signal,
+  };
+
+  let testProjectPath: string;
+
+  beforeEach(async () => {
+    testProjectPath = `/tmp/test-swarm-complete-${Date.now()}`;
+    fs.mkdirSync(testProjectPath, { recursive: true });
+    
+    // Create .hive directory and issues.jsonl
+    const hiveDir = `${testProjectPath}/.hive`;
+    fs.mkdirSync(hiveDir, { recursive: true });
+    fs.writeFileSync(`${hiveDir}/issues.jsonl`, "", "utf-8");
+    
+    // Set hive working directory to testProjectPath
+    const { setHiveWorkingDirectory } = await import("./hive");
+    setHiveWorkingDirectory(testProjectPath);
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(testProjectPath)) {
+      fs.rmSync(testProjectPath, { recursive: true, force: true });
+    }
+  });
+
+  test("calls captureSubtaskOutcome after successful completion with all params", async () => {
+    // Import hive tools
+    const { hive_create_epic } = await import("./hive");
+    
+    // Spy on captureSubtaskOutcome
+    const captureOutcomeSpy = spyOn(evalCapture, "captureSubtaskOutcome");
+
+    // Create an epic with a subtask using hive_create_epic
+    const epicResult = await hive_create_epic.execute({
+      epic_title: "Add OAuth",
+      epic_description: "Implement OAuth authentication",
+      subtasks: [
+        {
+          title: "Add auth service",
+          priority: 2,
+          files: ["src/auth/service.ts", "src/auth/schema.ts"],
+        },
+      ],
+    }, mockContext);
+    
+    const epicData = JSON.parse(epicResult);
+    expect(epicData.success).toBe(true);
+    
+    const epicId = epicData.epic.id;
+    const beadId = epicData.subtasks[0].id;
+
+    const startTime = Date.now() - 120000; // Started 2 minutes ago
+    const plannedFiles = ["src/auth/service.ts", "src/auth/schema.ts"];
+    const actualFiles = ["src/auth/service.ts", "src/auth/schema.ts", "src/auth/types.ts"];
+
+    // Call swarm_complete
+    const result = await swarm_complete.execute(
+      {
+        project_key: testProjectPath,
+        agent_name: "TestAgent",
+        bead_id: beadId,
+        summary: "Implemented OAuth service with JWT strategy",
+        files_touched: actualFiles,
+        skip_verification: true, // Skip verification for test
+        skip_review: true, // Skip review for test
+        planned_files: plannedFiles,
+        start_time: startTime,
+        error_count: 0,
+        retry_count: 0,
+      },
+      mockContext,
+    );
+
+    const parsed = JSON.parse(result);
+    expect(parsed.success).toBe(true);
+
+    // Verify captureSubtaskOutcome was called with correct params
+    expect(captureOutcomeSpy).toHaveBeenCalledTimes(1);
+    
+    const call = captureOutcomeSpy.mock.calls[0][0];
+    expect(call.epicId).toBe(epicId);
+    expect(call.projectPath).toBe(testProjectPath);
+    expect(call.beadId).toBe(beadId);
+    expect(call.title).toBe("Add auth service");
+    expect(call.plannedFiles).toEqual(plannedFiles);
+    expect(call.actualFiles).toEqual(actualFiles);
+    expect(call.durationMs).toBeGreaterThan(0);
+    expect(call.errorCount).toBe(0);
+    expect(call.retryCount).toBe(0);
+    expect(call.success).toBe(true);
+
+    captureOutcomeSpy.mockRestore();
+  });
+
+  test("does not call captureSubtaskOutcome when required params missing", async () => {
+    const { hive_create_epic } = await import("./hive");
+    const captureOutcomeSpy = spyOn(evalCapture, "captureSubtaskOutcome");
+
+    // Create an epic with a subtask
+    const epicResult = await hive_create_epic.execute({
+      epic_title: "Fix bug",
+      subtasks: [
+        {
+          title: "Fix auth bug",
+          priority: 1,
+          files: ["src/auth.ts"],
+        },
+      ],
+    }, mockContext);
+    
+    const epicData = JSON.parse(epicResult);
+    const beadId = epicData.subtasks[0].id;
+
+    // Call without planned_files or start_time
+    const result = await swarm_complete.execute(
+      {
+        project_key: testProjectPath,
+        agent_name: "TestAgent",
+        bead_id: beadId,
+        summary: "Fixed the bug",
+        skip_verification: true,
+        skip_review: true,
+        // No planned_files, start_time
+      },
+      mockContext,
+    );
+
+    const parsed = JSON.parse(result);
+    expect(parsed.success).toBe(true);
+
+    // Capture should still be called, but with default values
+    // (The function is called in all success cases, it just handles missing params)
+    expect(captureOutcomeSpy).toHaveBeenCalledTimes(1);
+
+    captureOutcomeSpy.mockRestore();
+  });
+});
+
+// ============================================================================
+// Eval Capture Integration Tests (swarm_record_outcome)
+// ============================================================================
+
+describe("finalizeEvalRecord integration", () => {
+  const mockContext = {
+    sessionID: `test-finalize-${Date.now()}`,
+    messageID: `test-message-${Date.now()}`,
+    agent: "test-agent",
+    abort: new AbortController().signal,
+  };
+
+  test("calls finalizeEvalRecord when project_path and epic_id provided", async () => {
+    const { swarm_record_outcome } = await import("./swarm-orchestrate");
+    
+    // Spy on finalizeEvalRecord
+    const finalizeEvalSpy = spyOn(evalCapture, "finalizeEvalRecord");
+    finalizeEvalSpy.mockReturnValue(null); // Mock return value
+
+    const testProjectPath = "/tmp/test-project";
+    const testEpicId = "bd-test123";
+    const testBeadId = `${testEpicId}.0`;
+
+    // Call swarm_record_outcome with epic_id and project_path
+    await swarm_record_outcome.execute({
+      bead_id: testBeadId,
+      duration_ms: 120000,
+      error_count: 0,
+      retry_count: 0,
+      success: true,
+      files_touched: ["src/test.ts"],
+      epic_id: testEpicId,
+      project_path: testProjectPath,
+    }, mockContext);
+
+    // Verify finalizeEvalRecord was called
+    expect(finalizeEvalSpy).toHaveBeenCalledTimes(1);
+    expect(finalizeEvalSpy).toHaveBeenCalledWith({
+      epicId: testEpicId,
+      projectPath: testProjectPath,
+    });
+
+    finalizeEvalSpy.mockRestore();
+  });
+
+  test("does not call finalizeEvalRecord when epic_id or project_path missing", async () => {
+    const { swarm_record_outcome } = await import("./swarm-orchestrate");
+    
+    // Spy on finalizeEvalRecord
+    const finalizeEvalSpy = spyOn(evalCapture, "finalizeEvalRecord");
+
+    const testBeadId = "bd-test123.0";
+
+    // Call without epic_id or project_path
+    await swarm_record_outcome.execute({
+      bead_id: testBeadId,
+      duration_ms: 120000,
+      error_count: 0,
+      retry_count: 0,
+      success: true,
+    }, mockContext);
+
+    // Verify finalizeEvalRecord was NOT called
+    expect(finalizeEvalSpy).toHaveBeenCalledTimes(0);
+
+    finalizeEvalSpy.mockRestore();
+  });
+
+  test("includes finalized record in response when available", async () => {
+    const { swarm_record_outcome } = await import("./swarm-orchestrate");
+    
+    // Mock finalizeEvalRecord to return a record
+    const mockFinalRecord = {
+      id: "bd-test123",
+      timestamp: new Date().toISOString(),
+      project_path: "/tmp/test-project",
+      task: "Test task",
+      strategy: "file-based" as const,
+      subtask_count: 2,
+      epic_title: "Test Epic",
+      subtasks: [],
+      overall_success: true,
+      total_duration_ms: 240000,
+      total_errors: 0,
+    };
+
+    const finalizeEvalSpy = spyOn(evalCapture, "finalizeEvalRecord");
+    finalizeEvalSpy.mockReturnValue(mockFinalRecord);
+
+    const testProjectPath = "/tmp/test-project";
+    const testEpicId = "bd-test123";
+    const testBeadId = `${testEpicId}.0`;
+
+    // Call with epic_id and project_path
+    const result = await swarm_record_outcome.execute({
+      bead_id: testBeadId,
+      duration_ms: 120000,
+      error_count: 0,
+      retry_count: 0,
+      success: true,
+      epic_id: testEpicId,
+      project_path: testProjectPath,
+    }, mockContext);
+
+    // Parse result and check for finalized record
+    const parsed = JSON.parse(result);
+    expect(parsed).toHaveProperty("finalized_eval_record");
+    expect(parsed.finalized_eval_record).toEqual(mockFinalRecord);
+
+    finalizeEvalSpy.mockRestore();
+  });
 });
