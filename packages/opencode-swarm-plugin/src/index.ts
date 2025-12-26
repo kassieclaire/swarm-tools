@@ -50,6 +50,7 @@ import { memoryTools } from "./memory-tools";
 import { observabilityTools } from "./observability-tools";
 import { researchTools } from "./swarm-research";
 import { evalTools } from "./eval-runner";
+import { contributorTools } from "./contributor-tools";
 import {
   guardrailOutput,
   DEFAULT_GUARDRAIL_CONFIG,
@@ -80,6 +81,7 @@ import { createCompactionHook } from "./compaction-hook";
  * - skills:* - Agent skills discovery, activation, and execution
  * - mandate:* - Agent voting system for collaborative knowledge curation
  * - semantic-memory:* - Semantic memory with vector embeddings (Ollama + PGLite)
+ * - contributor_lookup - GitHub contributor profile lookup with changeset credit generation
  *
  * @param input - Plugin context from OpenCode
  * @returns Plugin hooks including tools, events, and tool execution hooks
@@ -159,9 +161,10 @@ const SwarmPlugin: Plugin = async (
      * - beads:* - Legacy aliases (deprecated, use hive:* instead)
      * - agent-mail:init, agent-mail:send, agent-mail:reserve, etc. (legacy MCP)
      * - swarm-mail:init, swarm-mail:send, swarm-mail:reserve, etc. (embedded)
- * - repo-crawl:readme, repo-crawl:structure, etc.
- * - mandate:file, mandate:vote, mandate:query, etc.
- * - semantic-memory:store, semantic-memory:find, semantic-memory:get, etc.
+  * - repo-crawl:readme, repo-crawl:structure, etc.
+  * - mandate:file, mandate:vote, mandate:query, etc.
+  * - semantic-memory:store, semantic-memory:find, semantic-memory:get, etc.
+  * - contributor_lookup - GitHub contributor profile lookup with changeset credits
  */
      tool: {
       ...hiveTools,
@@ -177,6 +180,7 @@ const SwarmPlugin: Plugin = async (
       ...observabilityTools,
       ...researchTools,
       ...evalTools,
+      ...contributorTools,
     },
 
     /**
@@ -516,6 +520,7 @@ export const allTools = {
   ...mandateTools,
   ...memoryTools,
   ...observabilityTools,
+  ...contributorTools,
 } as const;
 
 /**
