@@ -119,7 +119,11 @@ export function useSwarmSocket(url: string, options: UseSwarmSocketOptions = {})
               }
               // Log first few events, then throttle
               if (prev.length < 10) {
-                console.log("[WS] Event:", agentEvent.type, agentEvent.agent_name || "");
+                const agentName = 
+                  ("agent_name" in agentEvent && agentEvent.agent_name) ||
+                  ("from_agent" in agentEvent && agentEvent.from_agent) ||
+                  "";
+                console.log("[WS] Event:", agentEvent.type, agentName);
               } else if (prev.length === 10) {
                 console.log("[WS] ... (throttling event logs)");
               }

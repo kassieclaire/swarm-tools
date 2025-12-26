@@ -256,6 +256,10 @@ export type AgentEvent =
   | DecompositionGeneratedEvent
   | SubtaskOutcomeEvent
   | HumanFeedbackEvent
+  | CellCreatedEvent
+  | CellUpdatedEvent
+  | CellStatusChangedEvent
+  | CellClosedEvent
   | SwarmCheckpointedEvent
   | SwarmRecoveredEvent;
 

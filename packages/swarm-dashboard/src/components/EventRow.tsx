@@ -62,6 +62,12 @@ function getBadgeColors(eventType: AgentEvent["type"]): { bg: string; text: stri
 
     // Human feedback - Flamingo
     human_feedback: { bg: "var(--flamingo, #f2cdcd)", text: "var(--base, #1e1e2e)" },
+
+    // Cell events - Rosewater/Pink
+    cell_created: { bg: "var(--rosewater, #f5e0dc)", text: "var(--base, #1e1e2e)" },
+    cell_updated: { bg: "var(--pink, #f5c2e7)", text: "var(--base, #1e1e2e)" },
+    cell_status_changed: { bg: "var(--pink, #f5c2e7)", text: "var(--base, #1e1e2e)" },
+    cell_closed: { bg: "var(--maroon, #eba0ac)", text: "var(--base, #1e1e2e)" },
   };
 
   return colorMap[eventType] || { bg: "var(--surface1, #45475a)", text: "var(--text, #cdd6f4)" };
@@ -106,6 +112,14 @@ function getEventSummary(event: AgentEvent): string {
       return `Checkpoint created for ${event.bead_id}`;
     case "swarm_recovered":
       return `Recovered ${event.bead_id}`;
+    case "cell_created":
+      return `Created: ${event.title}`;
+    case "cell_updated":
+      return `Updated: ${event.cell_id}`;
+    case "cell_status_changed":
+      return `Status: ${event.old_status} → ${event.new_status}`;
+    case "cell_closed":
+      return event.reason ? `Closed: ${event.reason}` : "Closed";
     default: {
       const _exhaustive: never = event;
       return String(_exhaustive);
