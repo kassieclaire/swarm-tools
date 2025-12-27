@@ -39,7 +39,7 @@ A TypeScript library providing:
 1. **Event Store** - Append-only log with automatic projection updates (agents, messages, file reservations)
 2. **Actor Primitives** - DurableMailbox, DurableLock, DurableCursor, DurableDeferred (Effect-TS based)
 3. **Hive** - Git-synced work item tracker (cells, epics, dependencies)
-4. **Semantic Memory** - Vector embeddings for persistent agent learnings (Ollama + libSQL vector extension)
+4. **Semantic Memory** - Vector embeddings for persistent agent learnings (Ollama + libSQL native vector support via sqlite-vec)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -58,7 +58,7 @@ A TypeScript library providing:
 │  └── DurableDeferred - Distributed promise                 │
 │                                                             │
 │  MEMORY                                                     │
-│  └── Semantic Memory - Vector embeddings (libSQL vec/Ollama) │
+│  └── Semantic Memory - Vector embeddings (Ollama/sqlite-vec) │
 │                                                             │
 │  STORAGE                                                    │
 │  └── libSQL (Embedded SQLite via Drizzle ORM)              │
@@ -250,65 +250,33 @@ await hive.closeCell(cell.id, "Completed: OAuth implemented");
 
 ### Semantic Memory
 
-Vector embeddings for persistent agent learnings with **Wave 1-3 smart operations**:
+Vector embeddings for persistent agent learnings. Uses **libSQL native vector support via sqlite-vec extension** + **Ollama** for embeddings. Includes **Wave 1-3 smart operations** (Mem0 pattern, auto-tagging, linking, entity extraction).
+
+#### Basic Usage
 
 ```typescript
 import { createSemanticMemory } from "swarm-mail";
 
 const memory = await createSemanticMemory("/my/project");
 
-// Basic store (always adds new memory)
+// Simple store (backward compatible - always adds new)
 const { id } = await memory.store(
-  "OAuth refresh tokens need 5min buffer before expiry to avoid race conditions",
+  "OAuth refresh tokens need 5min buffer before expiry to avoid race conditions"
+);
+
+// Store with manual metadata
+const { id } = await memory.store(
+  "OAuth tokens need 5min buffer before expiry",
   { tags: "auth,tokens,debugging" }
 );
 
-// Smart upsert (Mem0 pattern) - LLM decides ADD/UPDATE/DELETE/NOOP
-const result = await memory.upsert(
-  "OAuth tokens need 5min buffer (changed from 3min)",
-  { useSmartOps: true }
-);
-console.log(result.operation); // "UPDATE" - refines existing memory
-console.log(result.reason);    // "Refines existing memory with additional detail"
-
-// Auto-tagging - LLM extracts tags from content
-const { id, autoTags } = await memory.store(
-  "OAuth tokens need 5min buffer before expiry",
-  { autoTag: true }
-);
-console.log(autoTags); // { tags: ["auth", "oauth", "tokens"], confidence: 0.85 }
-
-// Auto-linking - semantic similarity finds related memories
-const { id, links } = await memory.store(
-  "Token refresh race condition fixed in auth service",
-  { autoLink: true }
-);
-console.log(links); // [{ memory_id: "mem-abc123", link_type: "related" }]
-
-// Entity extraction - build knowledge graph automatically
-const { id } = await memory.store(
-  "Joel prefers TypeScript for Next.js projects",
-  { extractEntities: true }
-);
-// Extracts: entities["Joel", "TypeScript", "Next.js"], relationship["Joel", "prefers", "TypeScript"]
-
-// Combine all smart features
-const result = await memory.store(
-  "OAuth tokens need 5min buffer before expiry",
-  { 
-    autoTag: true, 
-    autoLink: true, 
-    extractEntities: true 
-  }
-);
-
-// Search by meaning (vector similarity)
+// Search by semantic similarity (vector search)
 const results = await memory.find("token refresh issues", { limit: 5 });
 
-// Get memory by ID
+// Get specific memory
 const mem = await memory.get(id);
 
-// Validate (resets decay timer)
+// Validate (resets 90-day decay timer)
 await memory.validate(id);
 
 // Check Ollama health
@@ -320,82 +288,149 @@ const health = await memory.checkHealth();
 
 **Smart Upsert (Mem0 Pattern)**
 
-LLM analyzes new information against existing memories to decide operation:
+LLM analyzes new information and decides: ADD (new), UPDATE (refines), DELETE (contradicts), or NOOP (duplicate):
 
 ```typescript
-// LLM decides: ADD (new), UPDATE (refines), DELETE (contradicts), or NOOP (duplicate)
-const result = await memory.upsert("New information", { useSmartOps: true });
-console.log(result.operation); // "ADD" | "UPDATE" | "DELETE" | "NOOP"
-console.log(result.reason);    // Human-readable explanation
+// LLM decides operation intelligently
+const result = await memory.upsert(
+  "OAuth tokens need 5min buffer (changed from 3min)",
+  { useSmartOps: true }
+);
+
+console.log(result.operation); // "UPDATE" - refines existing memory
+console.log(result.reason);    // "Refines existing memory with updated timing"
 console.log(result.id);        // Memory ID (existing for UPDATE/DELETE/NOOP, new for ADD)
+
+// Examples of each operation:
+// ADD: Completely new information not in memory
+// UPDATE: Refines/updates existing memory with additional detail
+// DELETE: New info contradicts existing memory (supersedes it)
+// NOOP: Duplicate - already stored
 ```
 
 **Auto-Tagging**
 
-LLM extracts relevant tags from content:
+LLM extracts relevant tags from content automatically:
 
 ```typescript
-const { autoTags } = await memory.store("Content here", { autoTag: true });
-// { tags: ["extracted", "tags"], confidence: 0.8 }
+const { id, autoTags } = await memory.store(
+  "OAuth tokens need 5min buffer before expiry",
+  { autoTag: true }
+);
+
+console.log(autoTags); 
+// { tags: ["auth", "oauth", "tokens", "timing"], confidence: 0.85 }
 ```
 
-**Memory Linking (Zettelkasten)**
+**Memory Linking (Zettelkasten Pattern)**
 
 Auto-link to semantically related memories:
 
 ```typescript
-const { links } = await memory.store("Content", { autoLink: true });
-// [{ memory_id: "mem-xyz", link_type: "related" }]
+const { id, links } = await memory.store(
+  "Token refresh race condition fixed in auth service",
+  { autoLink: true }
+);
+
+console.log(links); 
+// [{ memory_id: "mem-abc123", link_type: "related", score: 0.82 }]
 
 // Query linked memories
-const linked = await memory.getLinkedMemories("mem-abc123", "related");
+const related = await memory.getLinkedMemories("mem-abc123", "related");
 ```
 
 **Entity Extraction (A-MEM Pattern)**
 
-Build knowledge graph from natural language:
+Build knowledge graph from natural language automatically:
 
 ```typescript
-await memory.store("Joel prefers TypeScript", { extractEntities: true });
+const { id, entities } = await memory.store(
+  "Joel prefers TypeScript for Next.js projects",
+  { extractEntities: true }
+);
+
+console.log(entities);
+// {
+//   entities: [
+//     { name: "Joel", type: "person" },
+//     { name: "TypeScript", type: "technology" },
+//     { name: "Next.js", type: "technology" }
+//   ],
+//   relationships: [
+//     { from: "Joel", to: "TypeScript", type: "prefers" }
+//   ]
+// }
 
 // Query by entity
 const joelMemories = await memory.findByEntity("Joel", "person");
 
-// Get knowledge graph
+// Get knowledge graph for a memory
 const graph = await memory.getKnowledgeGraph("mem-abc123");
 // { entities: [...], relationships: [...] }
 ```
 
-**Temporal Queries**
+**Combine All Smart Features**
 
-Query memories valid at specific timestamps:
+```typescript
+const result = await memory.store(
+  "OAuth tokens need 5min buffer before expiry to avoid race conditions",
+  { 
+    autoTag: true,        // LLM extracts tags
+    autoLink: true,       // Links to related memories
+    extractEntities: true // Builds knowledge graph
+  }
+);
+
+// Returns: { id, autoTags, links, entities }
+```
+
+#### Temporal Queries (Wave 2)
+
+Query memories valid at specific timestamps for time-travel debugging:
 
 ```typescript
 // Find memories valid on January 1, 2024
 const pastMemories = await memory.findValidAt(
-  "authentication",
+  "authentication patterns",
   new Date("2024-01-01")
 );
 
 // Track supersession chains (version history)
 const chain = await memory.getSupersessionChain("mem-v1");
-// Returns: [v1, v2, v3] (chronological)
+// Returns: [mem-v1, mem-v2, mem-v3] (chronological evolution)
 
-// Mark memory as superseded
-await memory.supersede("old-id", "new-id");
+// Mark memory as superseded (when updating)
+await memory.supersede("mem-old-auth", "mem-new-auth");
 ```
+
+#### Schema Extensions (Wave 1-3)
+
+New tables and columns added for smart operations:
+
+**Tables:**
+- `memory_links` - Semantic relationships between memories (Zettelkasten)
+- `entities` - Extracted entities (people, places, concepts)
+- `relationships` - Entity relationships (subject-predicate-object triples)
+- `memory_entities` - Join table linking memories to entities
+
+**Columns:**
+- `memories.valid_from` - Temporal validity start (UTC timestamp)
+- `memories.valid_until` - Temporal validity end (NULL = current)
+- `memories.superseded_by` - Points to newer version (version chains)
+- `memories.auto_tags` - JSON array of LLM-extracted tags
+- `memories.keywords` - Searchable keyword index
 
 #### Graceful Degradation
 
-All smart operations use **fallback heuristics** if LLM unavailable:
+All smart operations use **fallback heuristics** if LLM/Ollama unavailable:
 
 - **Smart ops**: Falls back to simple ADD operation
-- **Auto-tagging**: Returns undefined (no auto-tags added)
-- **Auto-linking**: Returns undefined (no links created)
-- **Entity extraction**: Returns empty entities/relationships
+- **Auto-tagging**: Returns `undefined` (no auto-tags added)
+- **Auto-linking**: Returns `undefined` (no links created)
+- **Entity extraction**: Returns empty `entities`/`relationships` arrays
 - **Vector search**: Falls back to full-text search (FTS5)
 
-No crashes, no exceptions - degraded functionality, not broken functionality.
+**No crashes, no exceptions** - degraded functionality, not broken functionality.
 
 #### ID Prefix Convention
 
@@ -404,6 +439,52 @@ Memory IDs use `mem-` prefix (not `mem_`):
 ```typescript
 const { id } = await memory.store("Content");
 console.log(id); // "mem-abc123def456" (16 hex chars after prefix)
+```
+
+#### Wave 1-3 Service Exports
+
+For advanced use cases, you can access the underlying services directly:
+
+```typescript
+import {
+  // Smart Operations (Mem0 pattern)
+  analyzeMemoryOperation,
+  
+  // Auto-tagging
+  generateTags,
+  
+  // Memory Linking (Zettelkasten)
+  autoLinkMemory,
+  createLink,
+  findRelatedMemories,
+  
+  // Entity Extraction (A-MEM)
+  extractEntitiesAndRelationships,
+  storeEntities,
+} from "swarm-mail";
+
+// Example: Manual smart operation
+const analysis = await analyzeMemoryOperation(
+  "OAuth tokens need 5min buffer",
+  existingMemories,
+  aiGatewayKey
+);
+console.log(analysis.operation); // "ADD" | "UPDATE" | "DELETE" | "NOOP"
+
+// Example: Manual tag generation
+const tags = await generateTags(
+  "OAuth tokens need 5min buffer before expiry",
+  aiGatewayKey
+);
+console.log(tags); // { tags: ["auth", "oauth", "tokens"], confidence: 0.85 }
+
+// Example: Manual entity extraction
+const extracted = await extractEntitiesAndRelationships(
+  "Joel prefers TypeScript for Next.js projects",
+  aiGatewayKey
+);
+console.log(extracted.entities); // [{ name: "Joel", type: "person" }, ...]
+console.log(extracted.relationships); // [{ from: "Joel", to: "TypeScript", type: "prefers" }]
 ```
 
 > **Note:** Requires [Ollama](https://ollama.ai/) for vector embeddings and smart operations. Falls back to full-text search if unavailable.
