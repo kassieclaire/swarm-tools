@@ -8,7 +8,7 @@
  * - Layout provides responsive 3-column grid
  */
 
-import { Layout } from "./components";
+import { Layout, ConnectionStatus } from "./components";
 import { AgentsPane } from "./components/AgentsPane";
 import { EventsPane } from "./components/EventsPane";
 import { CellsPane } from "./components/CellsPane";
@@ -24,12 +24,39 @@ const WS_URL = "ws://localhost:4483/ws";
  * - Active agents with current tasks (WebSocket-driven)
  * - Live event stream with filtering (WebSocket-driven)
  * - Cell hierarchy tree with status (WebSocket-driven)
+ * - Connection status with automatic reconnection
  */
 function App() {
-  const { state, events } = useSwarmSocket(WS_URL);
+  const { state, events, ws } = useSwarmSocket(WS_URL);
+
+  // Map WebSocket state to ConnectionStatus state
+  // 'reconnecting' and 'error' both map to 'disconnected' for the component
+  const connectionState: "connecting" | "connected" | "disconnected" =
+    state === "connected" ? "connected" :
+    state === "connecting" ? "connecting" :
+    "disconnected"; // reconnecting, error, disconnected all map to disconnected
+
+  // Reconnect handler - partysocket handles this automatically,
+  // but we expose the reconnect method for manual retry
+  const handleReconnect = () => {
+    if (ws.reconnect) {
+      ws.reconnect();
+    } else {
+      // Fallback: close and let partysocket auto-reconnect
+      ws.close();
+    }
+  };
 
   return (
-    <Layout>
+    <Layout
+      connectionStatus={
+        <ConnectionStatus
+          connectionState={connectionState}
+          error={state === "error" ? "Connection failed" : undefined}
+          onReconnect={handleReconnect}
+        />
+      }
+    >
       {/* AgentsPane - derives agent status from events */}
       <AgentsPane events={events} state={state} />
       

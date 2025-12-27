@@ -4,10 +4,12 @@
 
 export { useEventSource } from "./useEventSource";
 export { useSwarmEventSubscription, useSwarmEvents } from "./useSwarmEvents";
-export { useSwarmSocket, useWebSocket } from "./useWebSocket";
+export { useSwarmSocket } from "./useSwarmSocket";
+// TODO: Update when useWebSocket.ts is migrated to use partysocket
+export { useWebSocket } from "./useWebSocket";
 export type { UseEventSourceOptions } from "./useEventSource";
 export type {
   UseSwarmEventSubscriptionOptions,
   UseSwarmEventsOptions,
 } from "./useSwarmEvents";
-export type { UseSwarmSocketOptions, WebSocketState } from "./useWebSocket";
+export type { UseSwarmSocketOptions, WebSocketState } from "./useSwarmSocket";

@@ -6,6 +6,7 @@ export { AgentCard } from "./AgentCard";
 export { AgentsPane } from "./AgentsPane";
 export { CellNode, type Cell } from "./CellNode";
 export { CellsPane } from "./CellsPane";
+export { ConnectionStatus, type ConnectionStatusProps } from "./ConnectionStatus";
 export { EventRow } from "./EventRow";
 export { EventsPane } from "./EventsPane";
 export { Layout, Pane } from "./Layout";

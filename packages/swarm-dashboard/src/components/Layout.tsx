@@ -12,6 +12,7 @@ import { ThemeToggle } from "./ThemeToggle";
 
 interface LayoutProps {
   children: ReactNode;
+  connectionStatus?: ReactNode;
 }
 
 /**
@@ -22,7 +23,7 @@ interface LayoutProps {
  * - Tablet (768-1024px): 2-column, cells full width below
  * - Desktop (>1024px): 3-column grid
  */
-export function Layout({ children }: LayoutProps) {
+export function Layout({ children, connectionStatus }: LayoutProps) {
   return (
     <div
       style={{
@@ -31,7 +32,7 @@ export function Layout({ children }: LayoutProps) {
         color: "var(--foreground0)",
       }}
     >
-      {/* Header with title and theme toggle */}
+      {/* Header with title, connection status, and theme toggle */}
       <header
         style={{
           display: "flex",
@@ -53,7 +54,10 @@ export function Layout({ children }: LayoutProps) {
         >
           🐝 Swarm Dashboard
         </h1>
-        <ThemeToggle />
+        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+          {connectionStatus}
+          <ThemeToggle />
+        </div>
       </header>
 
       {/* Main content grid */}
