@@ -76,10 +76,10 @@ function logCompaction(
 }
 
 /**
- * Capture compaction event for evals (non-fatal dynamic import)
+ * Capture compaction event for evals via CLI
  * 
- * Uses dynamic import to avoid circular dependencies and keep the plugin wrapper
- * self-contained. Captures COMPACTION events to session JSONL for eval analysis.
+ * Shells out to `swarm capture` command to avoid import issues.
+ * The CLI handles all the logic - plugin wrapper stays dumb.
  * 
  * @param sessionID - Session ID
  * @param epicID - Epic ID (or "unknown" if not detected)
@@ -93,14 +93,22 @@ async function captureCompaction(
   payload: any,
 ): Promise<void> {
   try {
-    // Dynamic import from package export
-    const { captureCompactionEvent } = await import("opencode-swarm-plugin/eval-capture");
-    captureCompactionEvent({
-      session_id: sessionID,
-      epic_id: epicID,
-      compaction_type: compactionType,
-      payload,
+    // Shell out to CLI - no imports needed, version always matches
+    const args = [
+      "capture",
+      "--session", sessionID,
+      "--epic", epicID,
+      "--type", compactionType,
+      "--payload", JSON.stringify(payload),
+    ];
+    
+    const proc = spawn(SWARM_CLI, args, {
+      env: { ...process.env, SWARM_PROJECT_DIR: projectDirectory },
+      stdio: ["ignore", "ignore", "ignore"], // Fire and forget
     });
+    
+    // Don't wait - capture is non-blocking
+    proc.unref();
   } catch (err) {
     // Non-fatal - capture failures shouldn't break compaction
     logCompaction("warn", "compaction_capture_failed", {

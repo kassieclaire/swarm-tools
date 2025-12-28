@@ -89,6 +89,7 @@ import {
 // Eval tools
 import { getPhase, getScoreHistory, recordEvalRun, getEvalHistoryPath } from "../src/eval-history.js";
 import { DEFAULT_THRESHOLDS, checkGate } from "../src/eval-gates.js";
+import { captureCompactionEvent } from "../src/eval-capture.js";
 
 // All tools (for tool command)
 import { allTools } from "../src/index.js";
@@ -5076,6 +5077,92 @@ async function viz() {
 }
 
 // ============================================================================
+// Capture Command - Capture eval events from plugin wrapper
+// ============================================================================
+
+/**
+ * Capture command - called by plugin wrapper to record eval events
+ * 
+ * Usage:
+ *   swarm capture --session <id> --epic <id> --type <type> --payload <json>
+ * 
+ * This allows the plugin wrapper to shell out instead of importing,
+ * avoiding version mismatch issues when the plugin is installed globally.
+ */
+async function capture() {
+  const args = process.argv.slice(3);
+  
+  let sessionId: string | null = null;
+  let epicId: string | null = null;
+  let compactionType: string | null = null;
+  let payloadJson: string | null = null;
+  
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    
+    if ((arg === "--session" || arg === "-s") && i + 1 < args.length) {
+      sessionId = args[++i];
+    } else if ((arg === "--epic" || arg === "-e") && i + 1 < args.length) {
+      epicId = args[++i];
+    } else if ((arg === "--type" || arg === "-t") && i + 1 < args.length) {
+      compactionType = args[++i];
+    } else if ((arg === "--payload" || arg === "-p") && i + 1 < args.length) {
+      payloadJson = args[++i];
+    }
+  }
+  
+  // Validate required args
+  if (!sessionId || !epicId || !compactionType) {
+    console.error("Usage: swarm capture --session <id> --epic <id> --type <type> [--payload <json>]");
+    console.error("");
+    console.error("Required:");
+    console.error("  --session, -s  Session ID");
+    console.error("  --epic, -e     Epic ID");
+    console.error("  --type, -t     Compaction type (detection_complete, prompt_generated, context_injected, resumption_started, tool_call_tracked)");
+    console.error("");
+    console.error("Optional:");
+    console.error("  --payload, -p  JSON payload");
+    process.exit(1);
+  }
+  
+  // Validate compaction type
+  const validTypes = ["detection_complete", "prompt_generated", "context_injected", "resumption_started", "tool_call_tracked"];
+  if (!validTypes.includes(compactionType)) {
+    console.error(`Invalid compaction type: ${compactionType}`);
+    console.error(`Valid types: ${validTypes.join(", ")}`);
+    process.exit(1);
+  }
+  
+  // Parse payload
+  let payload: any = {};
+  if (payloadJson) {
+    try {
+      payload = JSON.parse(payloadJson);
+    } catch (error) {
+      console.error(`Invalid JSON payload: ${error}`);
+      process.exit(1);
+    }
+  }
+  
+  // Capture the event
+  try {
+    captureCompactionEvent({
+      session_id: sessionId,
+      epic_id: epicId,
+      compaction_type: compactionType as any,
+      payload,
+    });
+    
+    // Silent success - this is a fire-and-forget operation
+    // Only output on error to avoid polluting logs
+  } catch (error) {
+    // Non-fatal - log but don't fail
+    console.error(`[swarm capture] Failed: ${error}`);
+    process.exit(1);
+  }
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -5143,6 +5230,9 @@ switch (command) {
     break;
   case "eval":
     await evalCommand();
+    break;
+  case "capture":
+    await capture();
     break;
   case "query":
     await query();
