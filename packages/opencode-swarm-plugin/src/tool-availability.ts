@@ -25,6 +25,7 @@ const BUNX_TIMEOUT_MS = 10000;
 export type ToolName =
   | "semantic-memory"
   | "cass"
+  | "hivemind" // Unified memory system (ADR-011) - replaces semantic-memory + cass
   | "ubs"
   | "hive"
   | "beads" // DEPRECATED: Use "hive" instead
@@ -162,6 +163,72 @@ const toolCheckers: Record<ToolName, () => Promise<ToolStatus>> = {
     }
   },
 
+  // Hivemind: Unified memory system (ADR-011)
+  // Checks both semantic-memory and cass availability
+  hivemind: async () => {
+    // Check native hivemind command first
+    const hivemindExists = await commandExists("hivemind");
+    if (hivemindExists) {
+      try {
+        const result = await Bun.$`hivemind stats`.quiet().nothrow();
+        return {
+          available: result.exitCode === 0,
+          checkedAt: new Date().toISOString(),
+          version: "native",
+        };
+      } catch (e) {
+        return {
+          available: false,
+          checkedAt: new Date().toISOString(),
+          error: String(e),
+        };
+      }
+    }
+
+    // Fall back to checking semantic-memory (hivemind uses same backend)
+    const semanticMemoryExists = await commandExists("semantic-memory");
+    if (semanticMemoryExists) {
+      try {
+        const result = await Bun.$`semantic-memory stats`.quiet().nothrow();
+        return {
+          available: result.exitCode === 0,
+          checkedAt: new Date().toISOString(),
+          version: "semantic-memory-backend",
+        };
+      } catch (e) {
+        return {
+          available: false,
+          checkedAt: new Date().toISOString(),
+          error: String(e),
+        };
+      }
+    }
+
+    // Try bunx semantic-memory with manual timeout
+    try {
+      const proc = Bun.spawn(["bunx", "semantic-memory", "stats"], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+
+      const timeout = setTimeout(() => proc.kill(), BUNX_TIMEOUT_MS);
+      const exitCode = await proc.exited;
+      clearTimeout(timeout);
+
+      return {
+        available: exitCode === 0,
+        checkedAt: new Date().toISOString(),
+        version: "bunx-semantic-memory",
+      };
+    } catch (e) {
+      return {
+        available: false,
+        checkedAt: new Date().toISOString(),
+        error: String(e),
+      };
+    }
+  },
+
   ubs: async () => {
     const exists = await commandExists("ubs");
     if (!exists) {
@@ -269,6 +336,8 @@ const fallbackBehaviors: Record<ToolName, string> = {
   "semantic-memory":
     "Learning data stored in-memory only (lost on session end)",
   cass: "Decomposition proceeds without historical context from past sessions",
+  hivemind:
+    "Unified memory unavailable - learnings stored in-memory only, no session history search",
   ubs: "Subtask completion skips bug scanning - manual review recommended",
   hive: "Swarm cannot track issues - task coordination will be less reliable",
   beads:
@@ -329,6 +398,7 @@ export async function checkAllTools(): Promise<
   const tools: ToolName[] = [
     "semantic-memory",
     "cass",
+    "hivemind",
     "ubs",
     "hive",
     "beads",
