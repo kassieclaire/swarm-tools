@@ -51,7 +51,7 @@ import {
   createDurableStreamAdapter,
   createDurableStreamServer,
 } from "swarm-mail";
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
 import { tmpdir } from "os";
 
 // Query & observability tools
@@ -512,34 +512,53 @@ async function checkCommand(
   cmd: string,
   args: string[],
 ): Promise<{ available: boolean; version?: string }> {
-  try {
-    const proc = Bun.spawn([cmd, ...args], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const exitCode = await proc.exited;
-    if (exitCode === 0) {
-      const output = await new Response(proc.stdout).text();
-      const versionMatch = output.match(/v?(\d+\.\d+\.\d+)/);
-      return { available: true, version: versionMatch?.[1] };
+  return new Promise((resolve) => {
+    try {
+      const proc = spawn(cmd, args, {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      
+      let stdout = "";
+      proc.stdout?.on("data", (data) => {
+        stdout += data.toString();
+      });
+      
+      proc.on("error", () => {
+        resolve({ available: false });
+      });
+      
+      proc.on("close", (exitCode) => {
+        if (exitCode === 0) {
+          const versionMatch = stdout.match(/v?(\d+\.\d+\.\d+)/);
+          resolve({ available: true, version: versionMatch?.[1] });
+        } else {
+          resolve({ available: false });
+        }
+      });
+    } catch {
+      resolve({ available: false });
     }
-    return { available: false };
-  } catch {
-    return { available: false };
-  }
+  });
 }
 
 async function runInstall(command: string): Promise<boolean> {
-  try {
-    const proc = Bun.spawn(["bash", "-c", command], {
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    const exitCode = await proc.exited;
-    return exitCode === 0;
-  } catch {
-    return false;
-  }
+  return new Promise((resolve) => {
+    try {
+      const proc = spawn("bash", ["-c", command], {
+        stdio: "inherit",
+      });
+      
+      proc.on("error", () => {
+        resolve(false);
+      });
+      
+      proc.on("close", (exitCode) => {
+        resolve(exitCode === 0);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
 }
 
 async function checkAllDependencies(): Promise<CheckResult[]> {
