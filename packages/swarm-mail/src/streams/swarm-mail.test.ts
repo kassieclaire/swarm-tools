@@ -155,6 +155,126 @@ describe("swarm-mail", () => {
       expect(result.released).toBeDefined();
       expect(typeof result.releasedAt).toBe("number");
     });
+
+    test("should actually release reservations so another agent can reserve", async () => {
+      // This test verifies that releaseSwarmFiles properly releases reservations
+      // so other agents can reserve the same files without conflicts.
+      
+      // Agent A reserves a file
+      await initSwarmAgent({
+        projectPath: TEST_PROJECT,
+        agentName: "AgentA",
+        dbOverride: db,
+      });
+      
+      const reserveResult = await reserveSwarmFiles({
+        projectPath: TEST_PROJECT,
+        agentName: "AgentA",
+        paths: ["src/exclusive-file.ts"],
+        reason: "Working on feature",
+        exclusive: true,
+        dbOverride: db,
+      });
+      
+      expect(reserveResult.granted.length).toBe(1);
+      
+      // Agent A releases the file
+      const releaseResult = await releaseSwarmFiles({
+        projectPath: TEST_PROJECT,
+        agentName: "AgentA",
+        paths: ["src/exclusive-file.ts"],
+        dbOverride: db,
+      });
+      
+      expect(releaseResult.released).toBe(1);
+      
+      // Agent B should now be able to reserve the same file WITHOUT conflicts
+      await initSwarmAgent({
+        projectPath: TEST_PROJECT,
+        agentName: "AgentB",
+        dbOverride: db,
+      });
+      
+      const agentBReserve = await reserveSwarmFiles({
+        projectPath: TEST_PROJECT,
+        agentName: "AgentB",
+        paths: ["src/exclusive-file.ts"],
+        reason: "Taking over",
+        exclusive: true,
+        dbOverride: db,
+      });
+      
+      expect(agentBReserve.conflicts.length).toBe(0);
+      expect(agentBReserve.granted.length).toBe(1);
+    });
+
+    test("should release ALL reservations when no paths specified (swarm_complete pattern)", async () => {
+      // This test verifies the swarm_complete use case: release all reservations for an agent
+      // without specifying paths. This is how swarm_complete calls releaseSwarmFiles.
+      
+      // Agent C reserves multiple files
+      await initSwarmAgent({
+        projectPath: TEST_PROJECT,
+        agentName: "AgentC",
+        dbOverride: db,
+      });
+      
+      await reserveSwarmFiles({
+        projectPath: TEST_PROJECT,
+        agentName: "AgentC",
+        paths: ["src/file1.ts"],
+        reason: "Working on file1",
+        exclusive: true,
+        dbOverride: db,
+      });
+      
+      await reserveSwarmFiles({
+        projectPath: TEST_PROJECT,
+        agentName: "AgentC",
+        paths: ["src/file2.ts"],
+        reason: "Working on file2",
+        exclusive: true,
+        dbOverride: db,
+      });
+      
+      // Release ALL without specifying paths (this is how swarm_complete does it)
+      const releaseResult = await releaseSwarmFiles({
+        projectPath: TEST_PROJECT,
+        agentName: "AgentC",
+        // No paths specified - should release all
+        dbOverride: db,
+      });
+      
+      expect(releaseResult.released).toBe(2);
+      
+      // Agent D should be able to reserve both files without conflicts
+      await initSwarmAgent({
+        projectPath: TEST_PROJECT,
+        agentName: "AgentD",
+        dbOverride: db,
+      });
+      
+      const agentDReserve1 = await reserveSwarmFiles({
+        projectPath: TEST_PROJECT,
+        agentName: "AgentD",
+        paths: ["src/file1.ts"],
+        reason: "Taking over file1",
+        exclusive: true,
+        dbOverride: db,
+      });
+      
+      const agentDReserve2 = await reserveSwarmFiles({
+        projectPath: TEST_PROJECT,
+        agentName: "AgentD",
+        paths: ["src/file2.ts"],
+        reason: "Taking over file2",
+        exclusive: true,
+        dbOverride: db,
+      });
+      
+      expect(agentDReserve1.conflicts.length).toBe(0);
+      expect(agentDReserve2.conflicts.length).toBe(0);
+    });
   });
 
   describe("acknowledgeSwarmMessage", () => {

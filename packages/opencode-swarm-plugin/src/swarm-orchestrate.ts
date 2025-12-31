@@ -1620,15 +1620,21 @@ This will be recorded as a negative learning signal.`;
       }
 
       // Release file reservations for this agent using embedded swarm-mail
+      let reservationsReleased = false;
+      let reservationsReleasedCount = 0;
+      let reservationsReleaseError: string | undefined;
       try {
-        await releaseSwarmFiles({
+        const releaseResult = await releaseSwarmFiles({
           projectPath: args.project_key,
           agentName: args.agent_name,
           // Release all reservations for this agent
         });
+        reservationsReleased = true;
+        reservationsReleasedCount = releaseResult.released;
       } catch (error) {
         // Release might fail (e.g., no reservations existed)
         // This is non-fatal - log and continue
+        reservationsReleaseError = error instanceof Error ? error.message : String(error);
         console.warn(
           `[swarm] Failed to release file reservations for ${args.agent_name}:`,
           error,
@@ -1685,7 +1691,9 @@ This will be recorded as a negative learning signal.`;
         success: true,
         bead_id: args.bead_id,
         closed: true,
-        reservations_released: true,
+        reservations_released: reservationsReleased,
+        reservations_released_count: reservationsReleasedCount,
+        reservations_release_error: reservationsReleaseError,
         synced: syncSuccess,
         sync_error: syncError,
         message_sent: messageSent,
