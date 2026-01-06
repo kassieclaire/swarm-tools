@@ -82,6 +82,8 @@ import {
   exportToCSV,
   exportToJSON,
 } from "../src/export-tools.js";
+import { tree } from "./commands/tree.js";
+import { session } from "./commands/session.js";
 import {
   querySwarmHistory,
   formatSwarmHistory,
@@ -3283,6 +3285,11 @@ async function exportEvents() {
   }
 }
 
+async function treeCommand() {
+  const args = process.argv.slice(3);
+  await tree(args);
+}
+
 async function help() {
   console.log(yellow(BANNER));
   console.log(dim("  " + TAGLINE + " v" + VERSION));
@@ -3313,6 +3320,8 @@ ${cyan("Commands:")}
   swarm dashboard Live terminal UI with worker status (--epic, --refresh)
   swarm replay    Event replay with timing (--speed, --type, --agent, --since, --until)
   swarm export    Export events (--format otlp/csv/json, --epic, --output)
+  swarm tree      Visualize cell hierarchy as ASCII tree (--status, --epic, --json)
+  swarm session   Manage work sessions with handoff notes (start, end, status, history)
   swarm update    Update to latest version
   swarm version   Show version and banner
   swarm tool      Execute a tool (for plugin wrapper)
@@ -3394,6 +3403,16 @@ ${cyan("Observability Commands:")}
   swarm export --format csv            Export as CSV
   swarm export --epic <id>             Export specific epic only
   swarm export --output <file>         Write to file instead of stdout
+  swarm tree                           Show all cells as tree
+  swarm tree --status open             Show only open cells
+  swarm tree --epic <id>               Show specific epic subtree
+  swarm tree --json                    Output as JSON
+
+${cyan("Session Management (Chainlink-inspired):")}
+  swarm session start [--cell <id>]    Start new session (shows previous handoff notes)
+  swarm session end [--notes "..."]    End session with handoff notes for next session
+  swarm session status                 Show current session info
+  swarm session history [--limit n]    Show session history (default: 10)
 
 ${cyan("Usage in OpenCode:")}
   /swarm "Add user authentication with OAuth"
@@ -6219,6 +6238,12 @@ switch (command) {
     break;
   case "export":
     await exportEvents();
+    break;
+  case "tree":
+    await treeCommand();
+    break;
+  case "session":
+    await session();
     break;
   case "version":
   case "--version":

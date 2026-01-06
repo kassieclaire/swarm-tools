@@ -553,6 +553,89 @@ export interface QueryAdapter {
 }
 
 // ============================================================================
+// Session Operations (Chainlink-inspired)
+// ============================================================================
+
+/**
+ * Session for tracking work continuity
+ * 
+ * Inspired by Chainlink's session management pattern.
+ * Credit: @dollspace-gay (https://github.com/dollspace-gay/chainlink)
+ */
+export interface Session {
+	id: number;
+	project_key: string;
+	started_at: number;
+	ended_at: number | null;
+	active_cell_id: string | null;
+	handoff_notes: string | null;
+	created_by: string | null;
+	/** Handoff notes from previous session (convenience field) */
+	previous_handoff_notes?: string | null;
+}
+
+export interface SessionAdapter {
+	/**
+	 * Start a new session
+	 * 
+	 * Returns previous session's handoff notes if available
+	 */
+	startSession(
+		projectKey: string,
+		options?: {
+			active_cell_id?: string;
+			created_by?: string;
+		},
+		projectPath?: string,
+	): Promise<Session>;
+
+	/**
+	 * End the current session
+	 * 
+	 * Optionally save handoff notes for next session
+	 */
+	endSession(
+		projectKey: string,
+		sessionId: number,
+		options?: {
+			handoff_notes?: string;
+		},
+		projectPath?: string,
+	): Promise<Session>;
+
+	/**
+	 * Get a specific session
+	 */
+	getSession(
+		projectKey: string,
+		sessionId: number,
+		projectPath?: string,
+	): Promise<Session | null>;
+
+	/**
+	 * Get current active session (if any)
+	 */
+	getCurrentSession(
+		projectKey: string,
+		projectPath?: string,
+	): Promise<Session | null>;
+
+	/**
+	 * Get session history
+	 * 
+	 * Returns sessions ordered by start time (newest first)
+	 */
+	getSessionHistory(
+		projectKey: string,
+		options?: {
+			limit?: number;
+			offset?: number;
+		},
+		projectPath?: string,
+	): Promise<Session[]>;
+}
+
+// ============================================================================
 // Schema Operations
 // ============================================================================
 
@@ -606,6 +689,7 @@ export interface HiveAdapter
     CommentAdapter,
     EpicAdapter,
     QueryAdapter,
+    SessionAdapter,
     HiveSchemaAdapter {
   /**
    * Get the underlying database adapter

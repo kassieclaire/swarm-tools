@@ -1716,6 +1716,102 @@ export const hive_link_thread = tool({
   },
 });
 
+/**
+ * Start a work session
+ * 
+ * Shows previous session's handoff notes if available.
+ * Inspired by Chainlink's session management pattern.
+ * Credit: @dollspace-gay (https://github.com/dollspace-gay/chainlink)
+ */
+export const hive_session_start = tool({
+  description: "Start a new work session (shows previous handoff notes)",
+  args: {
+    active_cell_id: tool.schema
+      .string()
+      .optional()
+      .describe("ID of cell being worked on"),
+  },
+  async execute(args, ctx) {
+    const projectKey = getHiveWorkingDirectory();
+    const adapter = await getHiveAdapter(projectKey);
+
+    try {
+      const session = await adapter.startSession(projectKey, {
+        active_cell_id: args.active_cell_id,
+      });
+
+      return JSON.stringify({
+        session_id: session.id,
+        started_at: new Date(session.started_at).toISOString(),
+        active_cell_id: session.active_cell_id,
+        previous_handoff_notes: session.previous_handoff_notes,
+      }, null, 2);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HiveError(
+        `Failed to start session: ${message}`,
+        "hive_session_start",
+      );
+    }
+  },
+});
+
+/**
+ * End the current work session
+ * 
+ * Optionally save handoff notes for next session.
+ */
+export const hive_session_end = tool({
+  description: "End current session with optional handoff notes for next session",
+  args: {
+    handoff_notes: tool.schema
+      .string()
+      .optional()
+      .describe("Notes for next session (e.g., 'Completed X. Next: do Y')"),
+  },
+  async execute(args, ctx) {
+    const projectKey = getHiveWorkingDirectory();
+    const adapter = await getHiveAdapter(projectKey);
+
+    try {
+      // Get current session
+      const currentSession = await adapter.getCurrentSession(projectKey);
+
+      if (!currentSession) {
+        throw new HiveError(
+          "No active session to end",
+          "hive_session_end",
+        );
+      }
+
+      // End session
+      const endedSession = await adapter.endSession(
+        projectKey,
+        currentSession.id,
+        {
+          handoff_notes: args.handoff_notes,
+        },
+      );
+
+      const duration = endedSession.ended_at! - endedSession.started_at;
+
+      return JSON.stringify({
+        session_id: endedSession.id,
+        started_at: new Date(endedSession.started_at).toISOString(),
+        ended_at: new Date(endedSession.ended_at!).toISOString(),
+        duration_ms: duration,
+        handoff_notes: endedSession.handoff_notes,
+      }, null, 2);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HiveError(
+        `Failed to end session: ${message}`,
+        "hive_session_end",
+      );
+    }
+  },
+});
+
 // ============================================================================
 // Export all tools
 // ============================================================================
@@ -1731,6 +1827,8 @@ export const hiveTools = {
   hive_cells,
   hive_sync,
   hive_link_thread,
+  hive_session_start,
+  hive_session_end,
 };
 
 // ============================================================================

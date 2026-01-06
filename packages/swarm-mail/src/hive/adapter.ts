@@ -649,6 +649,164 @@ export function createHiveAdapter(
     // Database Connection Management
     // ============================================================================
 
+    // ============================================================================
+    // Session Operations (Chainlink-inspired)
+    // ============================================================================
+
+    async startSession(projectKeyParam, options?, projectPath?) {
+      // Get previous session's handoff notes
+      const previousSession = await db.query<{
+        handoff_notes: string | null;
+      }>(
+        `SELECT handoff_notes FROM sessions 
+         WHERE project_key = $1 AND ended_at IS NOT NULL
+         ORDER BY started_at DESC LIMIT 1`,
+        [projectKeyParam],
+      );
+
+      const previousNotes = previousSession.rows[0]?.handoff_notes || null;
+
+      // Create new session
+      const now = Date.now();
+      await db.query(
+        `INSERT INTO sessions (project_key, started_at, active_cell_id, created_by)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          projectKeyParam,
+          now,
+          options?.active_cell_id || null,
+          options?.created_by || null,
+        ],
+      );
+
+      // Get the newly created session
+      const result = await db.query<{
+        id: number;
+        project_key: string;
+        started_at: number;
+        ended_at: number | null;
+        active_cell_id: string | null;
+        handoff_notes: string | null;
+        created_by: string | null;
+      }>(
+        `SELECT * FROM sessions WHERE project_key = $1 AND started_at = $2`,
+        [projectKeyParam, now],
+      );
+
+      const session = result.rows[0];
+      if (!session) {
+        throw new Error("[HiveAdapter] Session creation failed");
+      }
+
+      return {
+        ...session,
+        previous_handoff_notes: previousNotes,
+      };
+    },
+
+    async endSession(projectKeyParam, sessionId, options?, projectPath?) {
+      // Check if session exists and is active
+      const existing = await db.query<{
+        id: number;
+        ended_at: number | null;
+      }>(`SELECT id, ended_at FROM sessions WHERE id = $1 AND project_key = $2`, [
+        sessionId,
+        projectKeyParam,
+      ]);
+
+      if (existing.rows.length === 0) {
+        throw new Error(`[HiveAdapter] Session not found: ${sessionId}`);
+      }
+
+      if (existing.rows[0].ended_at !== null) {
+        throw new Error("[HiveAdapter] Session already ended");
+      }
+
+      // End the session
+      const now = Date.now();
+      await db.query(
+        `UPDATE sessions SET ended_at = $1, handoff_notes = $2 WHERE id = $3`,
+        [now, options?.handoff_notes || null, sessionId],
+      );
+
+      // Return updated session
+      const result = await db.query<{
+        id: number;
+        project_key: string;
+        started_at: number;
+        ended_at: number | null;
+        active_cell_id: string | null;
+        handoff_notes: string | null;
+        created_by: string | null;
+      }>(`SELECT * FROM sessions WHERE id = $1`, [sessionId]);
+
+      const session = result.rows[0];
+      if (!session) {
+        throw new Error("[HiveAdapter] Session disappeared after update");
+      }
+
+      return session;
+    },
+
+    async getSession(projectKeyParam, sessionId, projectPath?) {
+      const result = await db.query<{
+        id: number;
+        project_key: string;
+        started_at: number;
+        ended_at: number | null;
+        active_cell_id: string | null;
+        handoff_notes: string | null;
+        created_by: string | null;
+      }>(
+        `SELECT * FROM sessions WHERE id = $1 AND project_key = $2`,
+        [sessionId, projectKeyParam],
+      );
+
+      return result.rows[0] || null;
+    },
+
+    async getCurrentSession(projectKeyParam, projectPath?) {
+      const result = await db.query<{
+        id: number;
+        project_key: string;
+        started_at: number;
+        ended_at: number | null;
+        active_cell_id: string | null;
+        handoff_notes: string | null;
+        created_by: string | null;
+      }>(
+        `SELECT * FROM sessions 
+         WHERE project_key = $1 AND ended_at IS NULL 
+         ORDER BY started_at DESC LIMIT 1`,
+        [projectKeyParam],
+      );
+
+      return result.rows[0] || null;
+    },
+
+    async getSessionHistory(projectKeyParam, options?, projectPath?) {
+      const limit = options?.limit || 10;
+      const offset = options?.offset || 0;
+
+      const result = await db.query<{
+        id: number;
+        project_key: string;
+        started_at: number;
+        ended_at: number | null;
+        active_cell_id: string | null;
+        handoff_notes: string | null;
+        created_by: string | null;
+      }>(
+        `SELECT * FROM sessions 
+         WHERE project_key = $1 
+         ORDER BY started_at DESC 
+         LIMIT $2 OFFSET $3`,
+        [projectKeyParam, limit, offset],
+      );
+
+      return result.rows;
+    },
+
     async getDatabase(projectPath?) {
       return db;
     },

@@ -456,6 +456,47 @@ export const beadsMigrations: Migration[] = [beadsMigration];
 export const hiveMigrations: Migration[] = [beadsMigration, cellsViewMigration];
 
 /**
+ * Migration v9: Add sessions table for handoff notes
+ *
+ * Inspired by Chainlink's session management pattern.
+ * Credit: @dollspace-gay (https://github.com/dollspace-gay/chainlink)
+ *
+ * Enables context preservation across sessions via handoff notes.
+ * When a session ends, agents can save notes for the next session.
+ * When a new session starts, it shows the previous handoff notes.
+ */
+export const sessionsMigrationLibSQL: Migration = {
+	version: 9,
+	description: "Add sessions table for handoff notes (Chainlink pattern)",
+	up: `
+    -- ========================================================================
+    -- Sessions Table
+    -- ========================================================================
+    CREATE TABLE IF NOT EXISTS sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_key TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      active_cell_id TEXT REFERENCES beads(id) ON DELETE SET NULL,
+      handoff_notes TEXT,
+      created_by TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_key);
+    CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
+    CREATE INDEX IF NOT EXISTS idx_sessions_active_cell ON sessions(active_cell_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_project_ended ON sessions(project_key, ended_at);
+  `,
+	down: `
+    DROP TABLE IF EXISTS sessions;
+  `,
+};
+
+/**
  * All hive migrations in order (LibSQL version)
  */
-export const hiveMigrationsLibSQL: Migration[] = [beadsMigrationLibSQL, cellsViewMigrationLibSQL];
+export const hiveMigrationsLibSQL: Migration[] = [
+	beadsMigrationLibSQL,
+	cellsViewMigrationLibSQL,
+	sessionsMigrationLibSQL,
+];
