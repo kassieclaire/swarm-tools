@@ -444,6 +444,35 @@ OpenCode plugin providing:
 - Learning system (pattern maturity, anti-pattern detection)
 - Skills system (knowledge injection)
 
+## Credits & Inspirations
+
+### Chainlink
+
+Several features are inspired by [Chainlink](https://github.com/dollspace-gay/chainlink) by @dollspace-gay:
+
+| Feature | Chainlink Inspiration |
+|---------|----------------------|
+| **Session Handoff** | Chainlink's session management with handoff notes for context preservation |
+| **Stub Detection** | `post-edit-check.py` patterns for detecting TODO, FIXME, pass, unimplemented!() |
+| **Tree View** | `tree` command with ASCII box-drawing and status indicators |
+| **Adversarial Review** | VDD methodology - hostile fresh-context reviewer (Sarcasmotron) |
+
+### VDD (Vomikron's Development Doctrine)
+
+The adversarial reviewer pattern comes from [VDD](https://github.com/Vomikron/VDD):
+
+- **Fresh context per review** - prevents "relationship drift" (becoming lenient)
+- **HALLUCINATING verdict** - when adversary invents issues, code is zero-slop
+- **Hostile tone** - zero tolerance for slop, no participation trophies
+
+### CASS (Coding Agent Session Search)
+
+Hivemind's unified session search is inspired by [CASS](https://github.com/Dicklesworthstone/coding_agent_session_search) by @Dicklesworthstone:
+
+- Semantic search across AI coding agent histories
+- Multi-agent indexing (Claude, Cursor, Codex, etc.)
+- Session + memory unification
+
 ## Project Skills
 
 Skills live in `.opencode/skills/` and provide reusable knowledge for agents.
