@@ -298,7 +298,7 @@ export async function migrateLibSQLToGlobal(
 			sourceDb,
 			globalDb,
 			"events",
-			"id, type, project_key, timestamp, data, created_at", // Exclude 'sequence' - it's GENERATED
+			"id, type, project_key, timestamp, data", // Exclude 'sequence' (GENERATED) and 'created_at' (removed)
 			stats.errors,
 		);
 	}
@@ -591,7 +591,7 @@ export async function migrateLocalDbToGlobal(
 			localDb,
 			globalDb,
 			"events",
-			"id, type, project_key, timestamp, data, created_at", // Exclude 'sequence' - it's GENERATED
+			"id, type, project_key, timestamp, data", // Exclude 'sequence' (GENERATED) and 'created_at' (removed)
 			stats.errors,
 		);
 	}

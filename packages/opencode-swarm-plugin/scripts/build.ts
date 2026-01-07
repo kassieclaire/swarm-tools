@@ -28,6 +28,7 @@ const CLI_ENTRIES: BuildEntry[] = [
 ];
 
 // Externals: modules that must be resolved at runtime, not bundled
+// NOTE: swarm-mail is bundled into CLI to avoid version mismatch issues with global install
 const EXTERNALS = [
   "@electric-sql/pglite",
   "swarm-mail",
@@ -38,8 +39,20 @@ const EXTERNALS = [
   "sisteransi",
 ];
 
-async function buildEntry(entry: BuildEntry): Promise<void> {
-  const externals = EXTERNALS.map(e => `--external ${e}`).join(" ");
+// CLI externals - swarm-mail is BUNDLED to avoid global install version issues
+const CLI_EXTERNALS = [
+  "@electric-sql/pglite",
+  "evalite",
+  "@clack/prompts",
+  "@clack/core",
+  "picocolors",
+  "sisteransi",
+  "@libsql/client",  // Native module, must be external
+];
+
+async function buildEntry(entry: BuildEntry, useCliExternals = false): Promise<void> {
+  const externalsList = useCliExternals ? CLI_EXTERNALS : EXTERNALS;
+  const externals = externalsList.map(e => `--external ${e}`).join(" ");
   const output = entry.outdir 
     ? `--outdir ${entry.outdir}` 
     : `--outfile ${entry.outfile}`;
@@ -84,9 +97,10 @@ async function main() {
   }
   
   // Phase 2: Build CLI (depends on library outputs)
-  console.log("\n🔧 Phase 2: Building CLI...");
+  // CLI uses CLI_EXTERNALS which bundles swarm-mail to avoid version mismatch
+  console.log("\n🔧 Phase 2: Building CLI (bundling swarm-mail)...");
   const cliResults = await Promise.allSettled(
-    CLI_ENTRIES.map(entry => buildEntry(entry))
+    CLI_ENTRIES.map(entry => buildEntry(entry, true))
   );
   
   // Check for CLI failures
