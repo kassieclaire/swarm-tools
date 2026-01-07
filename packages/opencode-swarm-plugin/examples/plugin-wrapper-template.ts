@@ -670,6 +670,42 @@ const beads_link_thread = tool({
 });
 
 // =============================================================================
+// Session Handoff Tools (Chainlink-inspired)
+// =============================================================================
+
+const hive_session_start = tool({
+  description: `Start a new work session with optional handoff notes from previous session.
+
+Chainlink-inspired session management for context preservation across sessions.
+Returns previous session's handoff notes if available.
+
+Credit: Chainlink session handoff pattern from https://github.com/dollspace-gay/chainlink`,
+  args: {
+    active_cell_id: tool.schema
+      .string()
+      .optional()
+      .describe("ID of cell being worked on"),
+  },
+  execute: (args, ctx) => execTool("hive_session_start", args, ctx),
+});
+
+const hive_session_end = tool({
+  description: `End current session with handoff notes for next session.
+
+Save context for the next agent/session to pick up where you left off.
+Include: what was done, what's next, any blockers or gotchas.
+
+Credit: Chainlink session handoff pattern from https://github.com/dollspace-gay/chainlink`,
+  args: {
+    handoff_notes: tool.schema
+      .string()
+      .optional()
+      .describe("Notes for next session (e.g., 'Completed X. Next: do Y. Watch out for Z.')"),
+  },
+  execute: (args, ctx) => execTool("hive_session_end", args, ctx),
+});
+
+// =============================================================================
 // Swarm Mail Tools (Embedded)
 // =============================================================================
 
@@ -2603,6 +2639,9 @@ const SwarmPlugin: Plugin = async (
       hive_cells,
       hive_sync,
       beads_link_thread,
+      // Session Handoff (Chainlink)
+      hive_session_start,
+      hive_session_end,
       // Swarm Mail (Embedded)
       swarmmail_init,
       swarmmail_send,
