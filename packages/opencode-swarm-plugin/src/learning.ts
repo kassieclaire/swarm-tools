@@ -391,6 +391,43 @@ export function scoreImplicitFeedback(
 }
 
 /**
+ * Score outcome from OutcomeSignals
+ *
+ * Convenience wrapper around scoreImplicitFeedback.
+ * Used by swarm_complete to score task outcomes automatically.
+ *
+ * @param signals - Outcome signals from completed subtask
+ * @param config - Learning configuration
+ * @returns Scored outcome with feedback type and score
+ *
+ * @example
+ * ```typescript
+ * const outcome = scoreOutcome({
+ *   bead_id: "bd-123",
+ *   duration_ms: 120000,
+ *   error_count: 1,
+ *   retry_count: 0,
+ *   success: true,
+ *   files_touched: ["src/auth.ts"],
+ *   timestamp: new Date().toISOString(),
+ *   strategy: "file-based"
+ * });
+ * // Returns: { type: "helpful", score: 0.85, reasoning: "..." }
+ * ```
+ */
+export function scoreOutcome(
+  signals: OutcomeSignals,
+  config: LearningConfig = DEFAULT_LEARNING_CONFIG,
+): { type: FeedbackType; score: number; reasoning: string } {
+  const scored = scoreImplicitFeedback(signals, config);
+  return {
+    type: scored.type,
+    score: scored.decayed_value,
+    reasoning: scored.reasoning,
+  };
+}
+
+/**
  * Create a feedback event from a scored outcome
  *
  * Converts implicit outcome scoring into an explicit feedback event
