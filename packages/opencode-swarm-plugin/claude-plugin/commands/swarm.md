@@ -18,4 +18,6 @@ If no task is provided, ask the user for the task description before proceeding.
 7. Review workers with `swarm_review()` + `swarm_review_feedback()`.
 
 ## Usage
-`/swarm:swarm Add OAuth authentication with Google and GitHub`
+`/swarm:swarm <task>`
+
+If `$ARGUMENTS` is empty, ask the user to provide the task before continuing.
