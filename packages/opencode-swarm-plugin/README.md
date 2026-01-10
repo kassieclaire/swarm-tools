@@ -33,11 +33,17 @@ swarm setup
 
 Choose **Marketplace → opencode-swarm-plugin → Install**.
 
-**Local dev (unpacked plugin):**
+**Global install (npm):**
 
 ```bash
-# From the repo root
-claude --plugin-dir ./packages/opencode-swarm-plugin
+# After `npm install -g opencode-swarm-plugin`
+swarm claude install
+```
+
+**Project-local config (standalone):**
+
+```bash
+swarm claude init
 ```
 
 **MCP auto-launch:** Claude Code starts MCP servers declared in the plugin `mcpServers` config automatically. You only need `swarm mcp-serve` when debugging outside Claude Code.
