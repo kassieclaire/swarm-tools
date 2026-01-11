@@ -165,6 +165,14 @@ describe("COORDINATOR_PROMPT", () => {
     expect(COORDINATOR_PROMPT).toMatch(/Task\(subagent_type="swarm-worker"/);
     expect(COORDINATOR_PROMPT).toMatch(/prompt.*swarm_spawn_subtask/i);
   });
+
+  test("forces path discovery via worker, not user", () => {
+    expect(COORDINATOR_PROMPT).toMatch(/path discovery/i);
+    expect(COORDINATOR_PROMPT).toMatch(/spawn.*worker.*path/i);
+    expect(COORDINATOR_PROMPT).toMatch(/do not ask.*user.*paths/i);
+    expect(COORDINATOR_PROMPT).toMatch(/requirements.*scope/i);
+    expect(COORDINATOR_PROMPT).toMatch(/never.*repo file paths/i);
+  });
 });
 
 describe("formatSubtaskPromptV2", () => {

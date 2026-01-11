@@ -767,6 +767,21 @@ Check for flags in the task:
 - Offer concrete options - not open-ended
 - Lead with recommendation - save cognitive load
 - Wait for answer - don't assume
+- Ask only about **requirements and scope**, never repo file paths or implementation details
+
+### Path Discovery (DO NOT ASK USER FOR PATHS)
+If you don't know the correct file paths (or a worker reports missing files), **do NOT ask the user**. Instead, spawn a short-lived **path discovery** worker to locate the real paths via glob/grep/read, then respawn the main workers with correct files.
+
+**Trigger conditions:**
+- File list is guessed or inferred
+- Worker reports missing files or incorrect paths
+- Repo structure is unknown or new to you
+
+**Requirements:**
+- **Always** spawn a worker for path discovery
+- **Never** ask the user to locate files or paths
+- Use explicit wording: "path discovery" in the worker subtask title
+- Replace bad file lists before spawning main workers
 
 ### Phase 1: Initialize
 \`swarmmail_init(project_path="{project_path}", task_description="Swarm: {task}")\`
