@@ -26,94 +26,118 @@
 
 ---
 
-_Note: You will need Bun installed to run this plugin. You can follow the instructions [here](https://bun.com/docs/installation)._
+## OpenCode Setup
 
-## 30-Second Start
+_Requires [Bun](https://bun.sh/docs/installation) installed._
 
-```bash
-# Install
-npm install -g opencode-swarm-plugin@latest
-
-# Set up (one-time)
-swarm setup
-
-# Use it
-/swarm "Add OAuth authentication"
-```
-
-That's it. The coordinator breaks the task into pieces, spawns parallel workers, tracks progress, and learns what works.
-
----
-
-## Claude Code Plugin
-
-### Option 1: Custom GitHub Marketplace (Recommended)
-
-Add this repo as a plugin marketplace, then install the swarm plugin via the Claude Code UI:
-
-1. **Add the custom marketplace:**
-   ```
-   /plugin
-   ```
-   Navigate: **Manage marketplaces** → **Add marketplace** → Enter: `joelhooks/opencode-swarm-plugin`
-
-2. **Install the swarm plugin:**
-   ```
-   /plugin
-   ```
-   Navigate: **Manage plugins** → Select the `opencode-swarm-plugin` marketplace → Select **swarm** → **Install**
-
-**What happens:**
-- Claude Code clones the repo to `~/.claude/plugins/`
-- The plugin manifest at `.claude-plugin/marketplace.json` registers the plugin
-- MCP server (`swarm-mcp-server.cjs`) starts automatically when Claude Code launches
-
-### Option 2: Official Marketplace
-
-If available in the official marketplace:
-
-```
-/plugin
-```
-
-Then pick **Marketplace → opencode-swarm-plugin → Install**.
-
-### Option 3: Global npm Install
+### Quick Start
 
 ```bash
 # Install globally
 npm install -g opencode-swarm-plugin@latest
 
-# Register with Claude Code
+# One-time setup (configures OpenCode integration)
+swarm setup
+
+# Use it in any OpenCode session
+/swarm "Add OAuth authentication"
+```
+
+That's it. The coordinator breaks the task into pieces, spawns parallel workers, tracks progress, and learns what works.
+
+### What `swarm setup` Does
+
+1. Creates `~/.opencode/plugins/swarm/` with plugin config
+2. Registers MCP tools (hive, hivemind, swarm coordination)
+3. Installs slash commands (`/swarm`, `/hive`, `/inbox`, `/status`, `/handoff`)
+4. Sets up skills and agents for parallel work
+
+### CLI Commands
+
+```bash
+swarm setup     # Install and configure (one-time)
+swarm doctor    # Check dependencies (Ollama for embeddings)
+swarm init      # Initialize hive in current project
+swarm config    # Show config file paths
+```
+
+### Verify Installation
+
+```bash
+swarm doctor
+```
+
+This checks:
+- OpenCode plugin registration
+- Ollama availability (for semantic memory embeddings)
+- Hive directory status
+
+---
+
+## Claude Code Setup
+
+Claude Code uses a separate thin plugin (`claude-code-swarm-plugin`) that delegates to the globally installed `swarm` CLI.
+
+### Prerequisites
+
+Install the swarm CLI first:
+
+```bash
+npm install -g opencode-swarm-plugin@latest
+```
+
+### Option 1: GitHub Marketplace (Recommended)
+
+Add this repo as a plugin marketplace via the Claude Code UI:
+
+1. **Add the custom marketplace:**
+   ```
+   /plugin
+   ```
+   Navigate: **Manage marketplaces** → **Add marketplace** → Enter: `joelhooks/swarm-tools`
+
+2. **Install the swarm plugin:**
+   ```
+   /plugin
+   ```
+   Navigate: **Manage plugins** → Select **swarm-tools** marketplace → Select **swarm** → **Install**
+
+**What happens:**
+- Claude Code clones the repo to `~/.claude/plugins/`
+- The marketplace (`swarm-tools`) contains the `swarm` plugin
+- MCP server starts automatically when Claude Code launches
+- All tool calls delegate to the globally installed `swarm` CLI
+
+### Option 2: Direct CLI Registration
+
+```bash
+# Register with Claude Code (after npm install -g)
 swarm claude install
 ```
 
-### Option 4: Project-local Config
+### Option 3: Project-local Config
 
 ```bash
 # Initialize plugin config in current project
 swarm claude init
 ```
 
-**MCP auto-launch:** Claude Code starts MCP servers declared in the plugin `mcpServers` config automatically. You only need `swarm mcp-serve` when debugging outside Claude Code.
+### Troubleshooting
 
-### MCP Troubleshooting (Marketplace Install)
+If Claude Code shows "MCP server failed" or swarm tools are missing:
 
-If Claude Code shows "MCP server failed" or the swarm tools are missing, the plugin likely wasn't built.
-
-1. From the repo root, build the plugin:
+1. Verify the CLI is installed: `swarm --version`
+2. From the repo root, rebuild:
    ```bash
-   bun install
-   bun turbo build --filter=opencode-swarm-plugin
+   bun install && bun turbo build --filter=opencode-swarm-plugin
    ```
-2. Confirm `packages/opencode-swarm-plugin/dist/` exists.
-3. Reinstall the plugin from `/plugin` and restart OpenCode.
+3. Reinstall the plugin from `/plugin` and restart Claude Code
 
 ---
 
 ## Your First Swarm
 
-In any OpenCode session:
+In any OpenCode or Claude Code session:
 
 ```
 /swarm "Add user authentication with OAuth"
@@ -217,17 +241,6 @@ Coordinator reviews worker output before approval. 3-strike rule: after 3 reject
                     │  Next time: use this   │
                     │  pattern again         │
                     └────────────────────────┘
-```
-
----
-
-## CLI Commands
-
-```bash
-swarm setup     # Install and configure (one-time)
-swarm doctor    # Check dependencies (CASS, Ollama)
-swarm init      # Initialize hive in current project
-swarm config    # Show config file paths
 ```
 
 ---
