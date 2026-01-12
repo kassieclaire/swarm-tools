@@ -75,7 +75,10 @@ async function buildEntry(entry: BuildEntry, useCliExternals = false): Promise<v
 
 import { cpSync, mkdirSync } from "fs";
 import { join } from "path";
-import { copyClaudePluginRuntimeAssets } from "../src/claude-plugin/claude-plugin-assets";
+import {
+  assertClaudePluginMcpEntrypointSynced,
+  copyClaudePluginRuntimeAssets,
+} from "../src/claude-plugin/claude-plugin-assets";
 
 /**
  * Sync compiled runtime assets into the Claude plugin dist folder.
@@ -83,7 +86,12 @@ import { copyClaudePluginRuntimeAssets } from "../src/claude-plugin/claude-plugi
 function syncClaudePluginRuntimeAssets(packageRoot: string): void {
   console.log("\n🧰 Syncing Claude plugin runtime bundle...");
   copyClaudePluginRuntimeAssets({ packageRoot });
+  const mcpBundleSource = join(packageRoot, "dist", "mcp", "swarm-mcp-server.js");
+  const mcpBundleTargetDir = join(packageRoot, "claude-plugin", "bin");
+  mkdirSync(mcpBundleTargetDir, { recursive: true });
+  cpSync(mcpBundleSource, join(mcpBundleTargetDir, "swarm-mcp-server.js"));
   console.log("   Copied dist to claude-plugin/dist");
+  console.log("   Copied MCP bundle to claude-plugin/bin");
 }
 
 async function main() {

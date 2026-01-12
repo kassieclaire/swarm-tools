@@ -12,7 +12,10 @@ import {
 } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { copyClaudePluginRuntimeAssets } from "./claude-plugin-assets";
+import {
+  assertClaudePluginMcpEntrypointSynced,
+  copyClaudePluginRuntimeAssets,
+} from "./claude-plugin-assets";
 
 type PackageManifest = {
   files?: string[];
@@ -49,6 +52,7 @@ describe("claude-plugin runtime assets", () => {
     const source = readBuildScript();
 
     expect(source).toContain("copyClaudePluginRuntimeAssets");
+    expect(source).toContain("assertClaudePluginMcpEntrypointSynced");
     expect(source).toContain("claude-plugin/dist");
     expect(source).toContain("swarm-mcp-server");
     expect(source).toContain("dist/mcp");
@@ -81,6 +85,50 @@ describe("claude-plugin runtime assets", () => {
       expect(() =>
         copyClaudePluginRuntimeAssets({ packageRoot: workspaceRoot }),
       ).toThrowError(/Missing MCP bundle/);
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("throws when the claude-plugin MCP entrypoint is stale", () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "swarm-plugin-"));
+
+    try {
+      const distRoot = join(workspaceRoot, "dist");
+      const pluginRoot = join(workspaceRoot, "claude-plugin");
+      const pluginDist = join(pluginRoot, "dist", "mcp");
+
+      mkdirSync(join(distRoot, "mcp"), { recursive: true });
+      mkdirSync(pluginDist, { recursive: true });
+
+      writeFileSync(join(distRoot, "mcp", "swarm-mcp-server.js"), "latest");
+      writeFileSync(join(pluginDist, "swarm-mcp-server.js"), "stale");
+
+      expect(() =>
+        assertClaudePluginMcpEntrypointSynced({ packageRoot: workspaceRoot }),
+      ).toThrowError(/MCP entrypoint is out of sync/);
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts matching claude-plugin MCP entrypoints", () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "swarm-plugin-"));
+
+    try {
+      const distRoot = join(workspaceRoot, "dist");
+      const pluginRoot = join(workspaceRoot, "claude-plugin");
+      const pluginDist = join(pluginRoot, "dist", "mcp");
+
+      mkdirSync(join(distRoot, "mcp"), { recursive: true });
+      mkdirSync(pluginDist, { recursive: true });
+
+      writeFileSync(join(distRoot, "mcp", "swarm-mcp-server.js"), "matched");
+      writeFileSync(join(pluginDist, "swarm-mcp-server.js"), "matched");
+
+      expect(() =>
+        assertClaudePluginMcpEntrypointSynced({ packageRoot: workspaceRoot }),
+      ).not.toThrow();
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true });
     }

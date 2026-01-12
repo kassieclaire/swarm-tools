@@ -27,6 +27,12 @@ type PackageManifest = {
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(TEST_DIR, "../..");
 const MANIFEST_PATH = join(PACKAGE_ROOT, "package.json");
+const MCP_ENTRYPOINT_PATH = join(
+  PACKAGE_ROOT,
+  "claude-plugin",
+  "bin",
+  "swarm-mcp-server.js",
+);
 
 /**
  * Reads the package manifest used for marketplace packaging.
@@ -35,12 +41,29 @@ function readPackageManifest(): PackageManifest {
   return JSON.parse(readFileSync(MANIFEST_PATH, "utf-8")) as PackageManifest;
 }
 
+/**
+ * Reads the bundled MCP entrypoint shipped in the plugin bin.
+ */
+function readBundledMcpEntrypoint(): string {
+  return readFileSync(MCP_ENTRYPOINT_PATH, "utf-8");
+}
+
 describe("claude-plugin MCP runtime assets", () => {
   it("publishes the claude-plugin runtime dist", () => {
     const manifest = readPackageManifest();
 
     expect(manifest.files).toContain("claude-plugin");
     expect(manifest.files).toContain("claude-plugin/dist");
+  });
+
+  it("ships a bundled MCP entrypoint with no runtime deps", () => {
+    expect(existsSync(MCP_ENTRYPOINT_PATH)).toBe(true);
+
+    const source = readBundledMcpEntrypoint();
+
+    expect(source).not.toContain("@modelcontextprotocol/");
+    expect(source).not.toContain("from \"swarm-mail\"");
+    expect(source).not.toContain("swarm-mcp-server.ts");
   });
 
   it("resolves the package root from built claude-plugin scripts", () => {
