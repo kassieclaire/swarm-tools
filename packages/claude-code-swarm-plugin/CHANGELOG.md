@@ -1,5 +1,11 @@
 # claude-code-swarm-plugin
 
+## 0.58.1
+
+### Patch Changes
+
+- [`f0aa875`](https://github.com/joelhooks/swarm-tools/commit/f0aa875136801dad649456733ab2d1de4e9c6341) Thanks [@joelhooks](https://github.com/joelhooks)! - fix: sync plugin.json version with package.json
+
 ## 0.58.0
 
 ### Minor Changes
