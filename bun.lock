@@ -45,7 +45,7 @@
     },
     "packages/claude-code-swarm-plugin": {
       "name": "claude-code-swarm-plugin",
-      "version": "0.59.4",
+      "version": "0.59.5",
       "dependencies": {
         "@modelcontextprotocol/sdk": "1.25.2",
         "zod": "^4.3.5",
@@ -55,9 +55,27 @@
         "typescript": "^5.7.0",
       },
     },
+    "packages/clawdbot-swarm-plugin": {
+      "name": "clawdbot-swarm-plugin",
+      "version": "0.59.5",
+      "dependencies": {
+        "@modelcontextprotocol/sdk": "1.25.2",
+        "zod": "^4.3.5",
+      },
+      "devDependencies": {
+        "@types/node": "^22.0.0",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "clawdbot": "*",
+      },
+      "optionalPeers": [
+        "clawdbot",
+      ],
+    },
     "packages/opencode-swarm-plugin": {
       "name": "opencode-swarm-plugin",
-      "version": "0.59.4",
+      "version": "0.59.5",
       "bin": {
         "swarm": "./dist/bin/swarm.js",
       },
@@ -145,7 +163,7 @@
     },
     "packages/swarm-mail": {
       "name": "swarm-mail",
-      "version": "1.10.3",
+      "version": "1.10.4",
       "bin": {
         "swarm-mail-daemon": "./bin/daemon-cli.ts",
         "swarm-db": "./bin/swarm-db.ts",
@@ -1060,6 +1078,8 @@
     "class-variance-authority": ["class-variance-authority@0.7.1", "", { "dependencies": { "clsx": "^2.1.1" } }, "sha512-Ka+9Trutv7G8M6WT6SeiRWz792K5qEqIGEGzXKhAE6xOWAY6pPH8U+9IY3oCMv6kqTmLsv7Xh/2w2RigkePMsg=="],
 
     "claude-code-swarm-plugin": ["claude-code-swarm-plugin@workspace:packages/claude-code-swarm-plugin"],
+
+    "clawdbot-swarm-plugin": ["clawdbot-swarm-plugin@workspace:packages/clawdbot-swarm-plugin"],
 
     "client-only": ["client-only@0.0.1", "", {}, "sha512-IV3Ou0jSMzZrd3pZ48nLkT9DA7Ag1pnPzaiQhpW7c3RbcqqzvzzVu+L8gfqMp/8IM2MQtSiqaCxrrcfu8I8rMA=="],
 
