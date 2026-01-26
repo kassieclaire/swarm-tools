@@ -1391,7 +1391,10 @@ describe("getPromptInsights", () => {
 			// when running in the full test suite. Other tests may have closed the
 			// global adapter, leaving stale entries in the instances cache.
 			const { createLibSQLAdapter, createSwarmMailAdapter, getGlobalDbPath, closeAllSwarmMailLibSQL } = await import("swarm-mail");
+			const { resetMemoryCache } = await import("./memory-tools");
 			await closeAllSwarmMailLibSQL();
+			// Also clear the memory adapter cache which holds refs to now-closed DB adapters
+			resetMemoryCache();
 			
 			// Now seed the database with review_feedback events using a fresh connection
 			const globalDbPath = getGlobalDbPath();
@@ -1436,10 +1439,12 @@ describe("getPromptInsights", () => {
 				],
 			);
 			
-			// Close the seeding adapter and clear caches so formatSubtaskPromptV2
+			// Close the seeding adapter and clear ALL caches so formatSubtaskPromptV2
 			// creates a fresh adapter that will see the seeded data
 			await testSwarmMail.close();
 			await closeAllSwarmMailLibSQL();
+			// Clear memory adapter cache again to ensure getWorkerInsights gets a fresh adapter
+			resetMemoryCache();
 			
 			// Now call formatSubtaskPromptV2 with those files
 			const { formatSubtaskPromptV2 } = await import("./swarm-prompts");
