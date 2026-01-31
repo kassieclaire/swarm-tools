@@ -82,9 +82,30 @@ export async function createLibSQLMemorySchema(db: Client): Promise<void> {
       valid_until TEXT,
       superseded_by TEXT REFERENCES memories(id),
       auto_tags TEXT,
-      keywords TEXT
+      keywords TEXT,
+      access_count TEXT DEFAULT '0',
+      last_accessed TEXT DEFAULT (datetime('now')),
+      category TEXT,
+      status TEXT DEFAULT 'active'
     )
   `);
+
+  // ========================================================================
+  // Auto-Migration: Add new columns to existing databases
+  // ========================================================================
+  // These ALTER TABLE statements are idempotent - they silently fail if column exists
+  try {
+    await db.execute(`ALTER TABLE memories ADD COLUMN access_count TEXT DEFAULT '0'`);
+  } catch { /* column already exists */ }
+  try {
+    await db.execute(`ALTER TABLE memories ADD COLUMN last_accessed TEXT DEFAULT (datetime('now'))`);
+  } catch { /* column already exists */ }
+  try {
+    await db.execute(`ALTER TABLE memories ADD COLUMN category TEXT`);
+  } catch { /* column already exists */ }
+  try {
+    await db.execute(`ALTER TABLE memories ADD COLUMN status TEXT DEFAULT 'active'`);
+  } catch { /* column already exists */ }
 
   // ========================================================================
   // Memory Links Table (Zettelkasten-style bidirectional connections)
@@ -314,9 +335,10 @@ export async function validateLibSQLMemorySchema(db: Client): Promise<boolean> {
     `);
     const columnNames = columns.rows.map((r) => r.name);
     const required = [
-      "id", "content", "metadata", "collection", "tags", 
+      "id", "content", "metadata", "collection", "tags",
       "created_at", "updated_at", "decay_factor", "embedding",
-      "valid_from", "valid_until", "superseded_by", "auto_tags", "keywords"
+      "valid_from", "valid_until", "superseded_by", "auto_tags", "keywords",
+      "access_count", "last_accessed", "category", "status"
     ];
     
     for (const col of required) {

@@ -164,6 +164,10 @@ export interface FindOptions {
   readonly fts?: boolean;
   /** Field selection for compact output (default: 'full') */
   readonly fields?: FieldSelection;
+  /** Track access on returned memories (updates last_accessed, increments access_count) */
+  readonly trackAccess?: boolean;
+  /** Filter by decay tier: 'hot' (7d), 'warm' (30d), 'all' (default) */
+  readonly decayTier?: "hot" | "warm" | "all";
 }
 
 /**
@@ -664,13 +668,24 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
      * @returns Search results with scores
      */
     async find(query: string, options: FindOptions = {}): Promise<SearchResult[]> {
-      const { limit = 10, collection, expand = false, fts = false, fields = "full" } = options;
+      const {
+        limit = 10,
+        collection,
+        expand = false,
+        fts = false,
+        fields = "full",
+        trackAccess = false,
+        decayTier = "all",
+      } = options;
 
       let results: SearchResult[];
 
+      // Common search options for both vector and FTS
+      const searchOpts = { limit, collection, trackAccess, decayTier };
+
       if (fts) {
         // Use full-text search (explicit user choice - no warning needed)
-        results = await store.ftsSearch(query, { limit, collection });
+        results = await store.ftsSearch(query, searchOpts);
       } else {
         // Try vector search
         const embedding = await generateEmbedding(query);
@@ -680,9 +695,9 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
             "⚠️  Ollama unavailable - falling back to FTS (full-text search). " +
             "Semantic search disabled. To restore vector search, ensure Ollama is running."
           );
-          results = await store.ftsSearch(query, { limit, collection });
+          results = await store.ftsSearch(query, searchOpts);
         } else {
-          results = await store.search(embedding, { limit, collection });
+          results = await store.search(embedding, searchOpts);
         }
       }
 

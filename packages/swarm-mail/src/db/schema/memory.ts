@@ -56,6 +56,10 @@ const vector = (dimension: number) =>
  * - superseded_by: Link to superseding memory (NULL = not superseded)
  * - auto_tags: LLM-generated tags (JSON array as TEXT)
  * - keywords: Space-separated keywords for FTS boost
+ * - access_count: Number of times accessed (for decay resistance)
+ * - last_accessed: Last access timestamp (for decay tiers)
+ * - category: Fact type (relationship, milestone, status, preference, context)
+ * - status: Memory status (active, superseded)
  */
 export const memories = sqliteTable("memories", {
   id: text("id").primaryKey(),
@@ -74,6 +78,12 @@ export const memories = sqliteTable("memories", {
   // Auto-generated metadata
   auto_tags: text("auto_tags"),
   keywords: text("keywords"),
+  // Access tracking for decay tiers (hot/warm/cold)
+  access_count: text("access_count").default("0"), // INTEGER stored as TEXT for SQLite compat
+  last_accessed: text("last_accessed").default("(datetime('now'))"),
+  // Fact categorization
+  category: text("category"), // relationship, milestone, status, preference, context
+  status: text("status").default("'active'"), // active, superseded
 });
 
 /**
