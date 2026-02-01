@@ -786,6 +786,7 @@ export const hive_create_epic = tool({
           type: "task",
           priority: subtask.priority ?? 2,
           parent_id: epic.id,
+          description: subtask.description,
         });
         await adapter.markDirty(projectKey, subtaskCell.id);
         created.push(subtaskCell);
