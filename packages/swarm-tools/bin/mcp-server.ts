@@ -9,6 +9,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { execSync, execFileSync } from "child_process";
 import { z } from "zod";
+import { randomBytes } from "crypto";
+
+// Generate a persistent session ID for this MCP server instance
+// This ensures all tool calls within the same MCP connection share state
+const MCP_SESSION_ID = `mcp-${randomBytes(8).toString("hex")}`;
 
 interface ToolInfo {
   name: string;
@@ -78,6 +83,11 @@ function executeTool(name: string, args: Record<string, unknown>): string {
     return execFileSync("swarm", ["tool", name, "--json", argsJson], {
       encoding: "utf-8",
       timeout: 300000,
+      env: {
+        ...process.env,
+        // Pass persistent session ID so swarmmail state persists across tool calls
+        OPENCODE_SESSION_ID: MCP_SESSION_ID,
+      },
     });
   } catch (error) {
     const err = error as { stdout?: string; message?: string };
