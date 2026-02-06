@@ -531,15 +531,9 @@ function jsonSchemaToZod(schema: Record<string, unknown>): z.ZodTypeAny {
         fieldSchema = z.boolean();
         break;
       case "array":
-        if (prop.items?.type === "object") {
-          fieldSchema = z.array(jsonSchemaToZod(prop.items as Record<string, unknown>));
-        } else if (prop.items?.type === "string") {
-          fieldSchema = z.array(z.string());
-        } else if (prop.items?.type === "number") {
-          fieldSchema = z.array(z.number());
-        } else {
-          fieldSchema = z.array(z.unknown());
-        }
+        // MCP protocol flattens array schemas to string, so accept both.
+        // Actual coercion from string→array happens in coerceArrayParams().
+        fieldSchema = z.union([z.string(), z.array(z.unknown())]);
         break;
       case "object":
         fieldSchema = jsonSchemaToZod(prop as Record<string, unknown>);
@@ -556,12 +550,78 @@ function jsonSchemaToZod(schema: Record<string, unknown>): z.ZodTypeAny {
 }
 
 /**
+ * Build a lookup of which tool params are arrays, so we can coerce
+ * string→array when the MCP protocol flattens array schemas to string.
+ */
+const ARRAY_PARAMS: Record<string, Set<string>> = {};
+for (const tool of TOOL_DEFINITIONS) {
+  const props = tool.inputSchema.properties as Record<string, { type?: string }> | undefined;
+  if (!props) continue;
+  for (const [key, prop] of Object.entries(props)) {
+    if (prop.type === "array") {
+      if (!ARRAY_PARAMS[tool.name]) ARRAY_PARAMS[tool.name] = new Set();
+      ARRAY_PARAMS[tool.name].add(key);
+    }
+  }
+}
+
+/**
+ * Coerce string values to arrays for params declared as type: "array".
+ * The MCP protocol flattens all array schemas to type: "string", so Claude
+ * sends JSON-encoded strings or pipe-delimited strings instead of arrays.
+ */
+function coerceArrayParams(name: string, args: Record<string, unknown>): Record<string, unknown> {
+  const arrayKeys = ARRAY_PARAMS[name];
+  if (!arrayKeys) return args;
+
+  const coerced = { ...args };
+  for (const key of arrayKeys) {
+    const val = coerced[key];
+    if (typeof val !== "string") continue;
+
+    const trimmed = val.trim();
+
+    // Try JSON parse first (handles "[{...}, {...}]" and "[\"a\", \"b\"]")
+    if (trimmed.startsWith("[")) {
+      try {
+        coerced[key] = JSON.parse(trimmed);
+        continue;
+      } catch {
+        // Fall through to pipe-delimited
+      }
+    }
+
+    // Pipe-delimited fallback (handles "task A | task B | task C")
+    if (trimmed.includes("|")) {
+      coerced[key] = trimmed.split("|").map(s => {
+        const t = s.trim();
+        // If the array items are objects (like subtasks), wrap in {title: ...}
+        return t.startsWith("{") ? JSON.parse(t) : { title: t };
+      });
+      continue;
+    }
+
+    // Comma-separated fallback for simple string arrays
+    if (trimmed.includes(",")) {
+      coerced[key] = trimmed.split(",").map(s => s.trim()).filter(Boolean);
+      continue;
+    }
+
+    // Single value → wrap in array
+    coerced[key] = [trimmed.startsWith("{") ? JSON.parse(trimmed) : trimmed];
+  }
+
+  return coerced;
+}
+
+/**
  * Execute a tool via swarm CLI.
  * Uses execFileSync to eliminate shell injection risk.
  */
 function executeTool(name: string, args: Record<string, unknown>): string {
   try {
-    const argsJson = JSON.stringify(args);
+    const coercedArgs = coerceArrayParams(name, args);
+    const argsJson = JSON.stringify(coercedArgs);
     const output = execFileSync("swarm", ["tool", name, "--json", argsJson], {
       encoding: "utf-8",
       timeout: 300000, // 5 minute timeout for long operations
