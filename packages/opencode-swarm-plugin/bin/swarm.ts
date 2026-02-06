@@ -8,6 +8,8 @@
  *   swarm setup    - Interactive installer for all dependencies
  *   swarm doctor   - Check dependency health with detailed status
  *   swarm init     - Initialize swarm in current project
+ *   swarm claude   - Claude Code integration commands
+ *   swarm mcp-serve - Debug-only MCP server (Claude auto-launches)
  *   swarm version  - Show version info
  *   swarm          - Interactive mode (same as setup)
  */
@@ -17,17 +19,20 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   readdirSync,
   renameSync,
   rmdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "fs";
 import { homedir } from "os";
-import { basename, dirname, join } from "path";
+import { basename, dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import {
   checkBeadsMigrationNeeded,
@@ -50,13 +55,17 @@ import {
   resolvePartialId,
   createDurableStreamAdapter,
   createDurableStreamServer,
+  consolidateDatabases,
+  getGlobalDbPath,
 } from "swarm-mail";
+import { createMemoryAdapter } from "../src/memory";
 import { execSync, spawn } from "child_process";
 import { tmpdir } from "os";
 
 // Query & observability tools
 import {
   executeQuery,
+  executeQueryCLI,
   executePreset,
   formatAsTable,
   formatAsCSV,
@@ -101,11 +110,16 @@ import { detectRegressions } from "../src/regression-detection.js";
 // All tools (for tool command)
 import { allTools } from "../src/index.js";
 
+// Skills (for skill-reload command)
+import { invalidateSkillsCache, discoverSkills } from "../src/skills.js";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // When bundled to dist/bin/swarm.js, need to go up two levels to find package.json
 const pkgPath = join(__dirname, "..", "..", "package.json");
 const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
 const VERSION: string = pkg.version;
+const PACKAGE_ROOT = dirname(pkgPath);
+const CLAUDE_PLUGIN_NAME = "swarm";
 
 // ============================================================================
 // ASCII Art & Branding
@@ -200,6 +214,156 @@ function rmWithStatus(path: string, label: string): void {
     rmSync(path);
     p.log.message(dim(`  Removed ${label}: ${path}`));
   }
+}
+
+// ============================================================================
+// Claude Code Integration Types & Helpers
+// ============================================================================
+
+interface ClaudeHookInput {
+  project?: { path?: string };
+  cwd?: string;
+  session?: { id?: string };
+  metadata?: { cwd?: string };
+  prompt?: string; // UserPromptSubmit includes the user's prompt text
+}
+
+/**
+ * Resolve the Claude Code plugin root bundled with the package.
+ */
+function getClaudePluginRoot(): string {
+  return join(PACKAGE_ROOT, "claude-plugin");
+}
+
+/**
+ * Resolve the Claude Code config directory.
+ */
+function getClaudeConfigDir(): string {
+  return join(homedir(), ".claude");
+}
+
+/**
+ * Read JSON input from stdin for Claude Code hooks.
+ */
+async function readHookInput<T>(): Promise<T | null> {
+  if (process.stdin.isTTY) return null;
+  const chunks: string[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk.toString());
+  }
+  const raw = chunks.join("").trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the project path for Claude Code hook executions.
+ */
+function resolveClaudeProjectPath(input: ClaudeHookInput | null): string {
+  return (
+    input?.project?.path ||
+    input?.cwd ||
+    input?.metadata?.cwd ||
+    process.env.CLAUDE_PROJECT_DIR ||
+    process.env.PWD ||
+    process.cwd()
+  );
+}
+
+/**
+ * Format hook output for Claude Code context injection.
+ * Uses the proper JSON format with hookSpecificOutput for structured feedback.
+ */
+function writeClaudeHookOutput(
+  hookEventName: string,
+  additionalContext: string,
+  options?: { suppressOutput?: boolean }
+): void {
+  if (!additionalContext.trim()) return;
+  process.stdout.write(
+    `${JSON.stringify({
+      suppressOutput: options?.suppressOutput,
+      hookSpecificOutput: {
+        hookEventName,
+        additionalContext,
+      },
+    })}\n`,
+  );
+}
+
+/**
+ * @deprecated Use writeClaudeHookOutput for proper hook-specific JSON format
+ */
+function writeClaudeHookContext(additionalContext: string): void {
+  if (!additionalContext.trim()) return;
+  process.stdout.write(
+    `${JSON.stringify({
+      additionalContext,
+    })}\n`,
+  );
+}
+
+interface ClaudeInstallStatus {
+  pluginRoot: string;
+  globalPluginPath: string;
+  globalPluginTarget?: string;
+  globalPluginExists: boolean;
+  globalPluginLinked: boolean;
+  projectClaudeDir: string;
+  projectConfigExists: boolean;
+  projectConfigPaths: string[];
+}
+
+/**
+ * Inspect Claude Code install state for global and project scopes.
+ */
+function getClaudeInstallStatus(projectPath: string): ClaudeInstallStatus {
+  const pluginRoot = getClaudePluginRoot();
+  const claudeConfigDir = getClaudeConfigDir();
+  const globalPluginPath = join(claudeConfigDir, "plugins", CLAUDE_PLUGIN_NAME);
+
+  let globalPluginExists = false;
+  let globalPluginLinked = false;
+  let globalPluginTarget: string | undefined;
+
+  if (existsSync(globalPluginPath)) {
+    globalPluginExists = true;
+    try {
+      const stat = lstatSync(globalPluginPath);
+      if (stat.isSymbolicLink()) {
+        globalPluginLinked = true;
+        const target = readlinkSync(globalPluginPath);
+        globalPluginTarget = resolve(dirname(globalPluginPath), target);
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+
+  const projectClaudeDir = join(projectPath, ".claude");
+  const projectConfigPaths = [
+    join(projectClaudeDir, "commands"),
+    join(projectClaudeDir, "agents"),
+    join(projectClaudeDir, "skills"),
+    join(projectClaudeDir, "hooks"),
+    join(projectClaudeDir, ".mcp.json"),
+  ];
+  const projectConfigExists = projectConfigPaths.some((path) => existsSync(path));
+
+  return {
+    pluginRoot,
+    globalPluginPath,
+    globalPluginTarget,
+    globalPluginExists,
+    globalPluginLinked,
+    projectClaudeDir,
+    projectConfigExists,
+    projectConfigPaths,
+  };
 }
 
 // ============================================================================
@@ -6025,6 +6189,1004 @@ async function memory() {
 }
 
 // ============================================================================
+// Claude Code Integration Commands
+// ============================================================================
+
+/**
+ * Claude subcommand dispatcher.
+ */
+async function claudeCommand() {
+  const args = process.argv.slice(3);
+  const subcommand = args[0];
+
+  if (!subcommand || ["help", "--help", "-h"].includes(subcommand)) {
+    showClaudeHelp();
+    return;
+  }
+
+  switch (subcommand) {
+    case "path":
+      claudePath();
+      break;
+    case "install":
+      await claudeInstall();
+      break;
+    case "uninstall":
+      await claudeUninstall();
+      break;
+    case "init":
+      await claudeInit();
+      break;
+    case "session-start":
+      await claudeSessionStart();
+      break;
+    case "user-prompt":
+      await claudeUserPrompt();
+      break;
+    case "pre-edit":
+      await claudePreEdit();
+      break;
+    case "pre-complete":
+      await claudePreComplete();
+      break;
+    case "post-complete":
+      await claudePostComplete();
+      break;
+    case "pre-compact":
+      await claudePreCompact();
+      break;
+    case "session-end":
+      await claudeSessionEnd();
+      break;
+    case "track-tool":
+      await claudeTrackTool(Bun.argv[4]); // tool name is 4th arg
+      break;
+    case "compliance":
+      await claudeCompliance();
+      break;
+    case "skill-reload":
+      await claudeSkillReload();
+      break;
+    case "coordinator-start":
+      await claudeCoordinatorStart();
+      break;
+    case "worker-start":
+      await claudeWorkerStart();
+      break;
+    case "subagent-stop":
+      await claudeSubagentStop();
+      break;
+    case "agent-stop":
+      await claudeAgentStop();
+      break;
+    case "track-task":
+      await claudeTrackTask();
+      break;
+    case "post-task-update":
+      await claudePostTaskUpdate();
+      break;
+    default:
+      console.error(`Unknown subcommand: ${subcommand}`);
+      showClaudeHelp();
+      process.exit(1);
+  }
+}
+
+function showClaudeHelp() {
+  console.log(`
+Usage: swarm claude <command>
+
+Commands:
+  path                Print Claude plugin path (for --plugin-dir)
+  install             Symlink plugin into ~/.claude/plugins/${CLAUDE_PLUGIN_NAME}
+  uninstall           Remove Claude plugin symlink
+  init                Create project-local .claude/ config
+  session-start       Hook: session start context (JSON output)
+  user-prompt         Hook: prompt submit context (JSON output)
+  pre-edit            Hook: pre-Edit/Write reminder (hivemind check)
+  pre-complete        Hook: pre-swarm_complete checklist
+  post-complete       Hook: post-swarm_complete learnings reminder
+  pre-compact         Hook: pre-compaction handler
+  session-end         Hook: session cleanup
+  track-tool          Hook: track mandatory tool usage
+  compliance          Hook: check worker compliance
+  skill-reload        Hook: hot-reload skills after modification
+  coordinator-start   Hook: coordinator subagent start
+  worker-start        Hook: worker subagent start
+  subagent-stop       Hook: subagent stop cleanup
+  agent-stop          Hook: agent stop cleanup
+  track-task          Hook: track task events
+  post-task-update    Hook: post task update tracking
+`);
+}
+
+/**
+ * Print the bundled Claude plugin path.
+ */
+function claudePath() {
+  const pluginRoot = getClaudePluginRoot();
+  if (!existsSync(pluginRoot)) {
+    console.error(`Claude plugin not found at ${pluginRoot}`);
+    process.exit(1);
+  }
+  console.log(pluginRoot);
+}
+
+/**
+ * Install the Claude plugin symlink for local development.
+ */
+async function claudeInstall() {
+  p.intro("swarm claude install");
+  const pluginRoot = getClaudePluginRoot();
+  if (!existsSync(pluginRoot)) {
+    p.log.error(`Claude plugin not found at ${pluginRoot}`);
+    p.outro("Aborted");
+    process.exit(1);
+  }
+
+  const claudeConfigDir = getClaudeConfigDir();
+  const pluginsDir = join(claudeConfigDir, "plugins");
+  const pluginPath = join(pluginsDir, CLAUDE_PLUGIN_NAME);
+
+  mkdirWithStatus(pluginsDir);
+
+  if (existsSync(pluginPath)) {
+    const stat = lstatSync(pluginPath);
+    if (!stat.isSymbolicLink()) {
+      p.log.error(`Existing path is not a symlink: ${pluginPath}`);
+      p.outro("Aborted");
+      process.exit(1);
+    }
+
+    const target = readlinkSync(pluginPath);
+    const resolved = resolve(dirname(pluginPath), target);
+    if (resolved === pluginRoot) {
+      p.log.success("Claude plugin already linked");
+      p.outro("Done");
+      return;
+    }
+
+    rmSync(pluginPath, { force: true });
+  }
+
+  symlinkSync(pluginRoot, pluginPath);
+  p.log.success(`Linked ${CLAUDE_PLUGIN_NAME} → ${pluginRoot}`);
+  p.log.message(dim("  Claude Code will auto-launch MCP from .mcp.json"));
+  p.outro("Claude plugin installed");
+}
+
+/**
+ * Remove the Claude plugin symlink.
+ */
+async function claudeUninstall() {
+  p.intro("swarm claude uninstall");
+  const pluginPath = join(getClaudeConfigDir(), "plugins", CLAUDE_PLUGIN_NAME);
+
+  if (!existsSync(pluginPath)) {
+    p.log.warn("Claude plugin symlink not found");
+    p.outro("Nothing to remove");
+    return;
+  }
+
+  rmSync(pluginPath, { recursive: true, force: true });
+  p.log.success(`Removed ${pluginPath}`);
+  p.outro("Claude plugin uninstalled");
+}
+
+/**
+ * Create project-local Claude Code config from bundled plugin assets.
+ */
+async function claudeInit() {
+  p.intro("swarm claude init");
+  const projectPath = process.cwd();
+  const pluginRoot = getClaudePluginRoot();
+
+  if (!existsSync(pluginRoot)) {
+    p.log.error(`Claude plugin not found at ${pluginRoot}`);
+    p.outro("Aborted");
+    process.exit(1);
+  }
+
+  const projectClaudeDir = join(projectPath, ".claude");
+  const commandDir = join(projectClaudeDir, "commands");
+  const agentDir = join(projectClaudeDir, "agents");
+  const skillsDir = join(projectClaudeDir, "skills");
+  const hooksDir = join(projectClaudeDir, "hooks");
+
+  for (const dir of [projectClaudeDir, commandDir, agentDir, skillsDir, hooksDir]) {
+    mkdirWithStatus(dir);
+  }
+
+  const copyMap = [
+    { src: join(pluginRoot, "commands"), dest: commandDir, label: "Commands" },
+    { src: join(pluginRoot, "agents"), dest: agentDir, label: "Agents" },
+    { src: join(pluginRoot, "skills"), dest: skillsDir, label: "Skills" },
+    { src: join(pluginRoot, "hooks"), dest: hooksDir, label: "Hooks" },
+  ];
+
+  for (const { src, dest, label } of copyMap) {
+    if (existsSync(src)) {
+      copyDirRecursiveSync(src, dest);
+      p.log.success(`${label}: ${dest}`);
+    }
+  }
+
+  const mcpSourcePath = join(pluginRoot, ".mcp.json");
+  if (existsSync(mcpSourcePath)) {
+    const mcpDestPath = join(projectClaudeDir, ".mcp.json");
+    const content = readFileSync(mcpSourcePath, "utf-8");
+    writeFileWithStatus(mcpDestPath, content, "MCP config");
+  }
+
+  const lspSourcePath = join(pluginRoot, ".lsp.json");
+  if (existsSync(lspSourcePath)) {
+    const lspDestPath = join(projectClaudeDir, ".lsp.json");
+    const content = readFileSync(lspSourcePath, "utf-8");
+    writeFileWithStatus(lspDestPath, content, "LSP config");
+  }
+
+  p.log.message(dim("  Uses ${CLAUDE_PLUGIN_ROOT} in MCP config"));
+  p.outro("Claude project config ready");
+}
+
+/**
+ * Claude hook: start a session and emit comprehensive context for Claude Code.
+ *
+ * Gathers:
+ * - Session info + previous handoff notes
+ * - In-progress cells (work that was mid-flight)
+ * - Open epics with their children
+ * - Recent activity summary
+ */
+async function claudeSessionStart() {
+  try {
+    const input = await readHookInput<ClaudeHookInput>();
+    const projectPath = resolveClaudeProjectPath(input);
+    const swarmMail = await getSwarmMailLibSQL(projectPath);
+    const db = await swarmMail.getDatabase(projectPath);
+    const adapter = createHiveAdapter(db, projectPath);
+
+    await adapter.runMigrations();
+
+    const session = await adapter.startSession(projectPath, {});
+    const contextLines: string[] = [];
+
+    // Session basics
+    contextLines.push(`## Swarm Session: ${session.id}`);
+    contextLines.push(`Source: ${(input as { source?: string }).source || "startup"}`);
+    contextLines.push("");
+
+    // Previous handoff notes (critical for continuation)
+    if (session.previous_handoff_notes) {
+      contextLines.push("## Previous Handoff Notes");
+      contextLines.push(session.previous_handoff_notes);
+      contextLines.push("");
+    }
+
+    // Active cell from previous session
+    if (session.active_cell_id) {
+      const activeCell = await adapter.getCell(projectPath, session.active_cell_id);
+      if (activeCell) {
+        contextLines.push("## Active Cell (from previous session)");
+        contextLines.push(`- **${activeCell.id}**: ${activeCell.title}`);
+        contextLines.push(`  Status: ${activeCell.status}, Priority: ${activeCell.priority}`);
+        if (activeCell.description) {
+          contextLines.push(`  ${activeCell.description.slice(0, 200)}...`);
+        }
+        contextLines.push("");
+      }
+    }
+
+    // In-progress cells (work that was mid-flight)
+    const inProgressCells = await adapter.getInProgressCells(projectPath);
+    if (inProgressCells.length > 0) {
+      contextLines.push("## In-Progress Work");
+      for (const cell of inProgressCells.slice(0, 5)) {
+        contextLines.push(`- **${cell.id}**: ${cell.title} (${cell.type}, P${cell.priority})`);
+        if (cell.description) {
+          contextLines.push(`  ${cell.description.slice(0, 150)}`);
+        }
+      }
+      if (inProgressCells.length > 5) {
+        contextLines.push(`  ... and ${inProgressCells.length - 5} more`);
+      }
+      contextLines.push("");
+    }
+
+    // Open epics (high-level context)
+    const openEpics = await adapter.queryCells(projectPath, {
+      status: "open",
+      type: "epic",
+      limit: 3
+    });
+    if (openEpics.length > 0) {
+      contextLines.push("## Open Epics");
+      for (const epic of openEpics) {
+        const children = await adapter.getEpicChildren(projectPath, epic.id);
+        const openChildren = children.filter(c => c.status !== "closed");
+        contextLines.push(`- **${epic.id}**: ${epic.title}`);
+        contextLines.push(`  ${openChildren.length}/${children.length} subtasks remaining`);
+      }
+      contextLines.push("");
+    }
+
+    // Stats summary
+    const stats = await adapter.getCellsStats(projectPath);
+    contextLines.push("## Hive Stats");
+    contextLines.push(`Open: ${stats.open} | In Progress: ${stats.in_progress} | Blocked: ${stats.blocked} | Closed: ${stats.closed}`);
+
+    writeClaudeHookOutput("SessionStart", contextLines.join("\n"));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Claude hook: provide active context on prompt submission.
+ *
+ * Lightweight hook that runs on every prompt. Provides:
+ * - Active session info
+ * - Current in-progress cell (if any)
+ * - Quick stats for awareness
+ *
+ * Output is suppressed from verbose mode to avoid noise.
+ */
+async function claudeUserPrompt() {
+  try {
+    const input = await readHookInput<ClaudeHookInput>();
+    const projectPath = resolveClaudeProjectPath(input);
+    const swarmMail = await getSwarmMailLibSQL(projectPath);
+    const db = await swarmMail.getDatabase(projectPath);
+    const adapter = createHiveAdapter(db, projectPath);
+
+    await adapter.runMigrations();
+
+    const session = await adapter.getCurrentSession(projectPath);
+    if (!session) return;
+
+    const contextLines: string[] = [];
+
+    // Always inject current timestamp for temporal awareness
+    const now = new Date();
+    const timestamp = now.toLocaleString("en-US", {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+    contextLines.push(`**Now**: ${timestamp}`);
+
+    // Semantic memory recall - search hivemind for relevant context
+    if (input.prompt && input.prompt.trim().length > 10) {
+      try {
+        const memoryAdapter = await createMemoryAdapter(db);
+        const findResult = await memoryAdapter.find({ query: input.prompt, limit: 3 });
+        const memories = findResult.results;
+
+        if (memories && memories.length > 0) {
+          // Only include high-confidence matches (score > 0.5)
+          const relevant = memories.filter((m: { score?: number }) => (m.score ?? 0) > 0.5);
+          if (relevant.length > 0) {
+            const memorySnippets = relevant
+              .slice(0, 2) // Max 2 memories to keep context light
+              .map((m: { content?: string; information?: string }) => {
+                const content = m.content || m.information || "";
+                return content.length > 200 ? content.slice(0, 200) + "..." : content;
+              })
+              .join(" | ");
+            contextLines.push(`**Recall**: ${memorySnippets}`);
+          }
+        }
+      } catch {
+        // Memory recall is optional - don't fail the hook
+      }
+    }
+
+    // Current active cell (most relevant context)
+    if (session.active_cell_id) {
+      const activeCell = await adapter.getCell(projectPath, session.active_cell_id);
+      if (activeCell && activeCell.status !== "closed") {
+        contextLines.push(`**Active**: ${activeCell.id} - ${activeCell.title}`);
+      }
+    }
+
+    // Quick in-progress count for awareness
+    const inProgress = await adapter.getInProgressCells(projectPath);
+    if (inProgress.length > 0) {
+      const titles = inProgress.slice(0, 3).map(c => c.title.slice(0, 40)).join(", ");
+      contextLines.push(`**WIP (${inProgress.length})**: ${titles}${inProgress.length > 3 ? "..." : ""}`);
+    }
+
+    // Only output if there's meaningful context
+    if (contextLines.length > 0) {
+      writeClaudeHookOutput("UserPromptSubmit", contextLines.join(" | "), { suppressOutput: true });
+    }
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Claude hook: capture comprehensive state before compaction.
+ *
+ * This is the CRITICAL hook for continuation. It captures:
+ * - All in-progress work with details
+ * - Active epic state and progress
+ * - Any pending/blocked cells
+ * - Reserved files
+ * - Session context
+ *
+ * The output becomes part of the compacted summary, enabling
+ * Claude to continue work seamlessly after context window fills.
+ */
+async function claudePreCompact() {
+  try {
+    const input = await readHookInput<ClaudeHookInput & { trigger?: string; custom_instructions?: string }>();
+    const projectPath = resolveClaudeProjectPath(input);
+    const swarmMail = await getSwarmMailLibSQL(projectPath);
+    const db = await swarmMail.getDatabase(projectPath);
+    const adapter = createHiveAdapter(db, projectPath);
+
+    await adapter.runMigrations();
+
+    const session = await adapter.getCurrentSession(projectPath);
+    const contextLines: string[] = [];
+
+    contextLines.push("# Swarm State Snapshot (Pre-Compaction)");
+    contextLines.push(`Trigger: ${input.trigger || "auto"}`);
+    if (input.custom_instructions) {
+      contextLines.push(`Instructions: ${input.custom_instructions}`);
+    }
+    contextLines.push("");
+
+    // Session info
+    if (session) {
+      contextLines.push("## Session");
+      contextLines.push(`ID: ${session.id}`);
+      if (session.active_cell_id) {
+        contextLines.push(`Active cell: ${session.active_cell_id}`);
+      }
+    }
+    contextLines.push("");
+
+    // In-progress work (CRITICAL for continuation)
+    const inProgressCells = await adapter.getInProgressCells(projectPath);
+    if (inProgressCells.length > 0) {
+      contextLines.push("## In-Progress Work (CONTINUE THESE)");
+      for (const cell of inProgressCells) {
+        contextLines.push(`### ${cell.id}: ${cell.title}`);
+        contextLines.push(`Type: ${cell.type} | Priority: ${cell.priority} | Status: ${cell.status}`);
+        if (cell.parent_id) {
+          contextLines.push(`Parent: ${cell.parent_id}`);
+        }
+        if (cell.description) {
+          contextLines.push(`Description: ${cell.description}`);
+        }
+        // Get comments for context on progress
+        const comments = await adapter.getComments(projectPath, cell.id);
+        if (comments.length > 0) {
+          const recent = comments.slice(-3);
+          contextLines.push("Recent notes:");
+          for (const comment of recent) {
+            contextLines.push(`- ${comment.body.slice(0, 200)}`);
+          }
+        }
+        contextLines.push("");
+      }
+    }
+
+    // Open epics with children status
+    const openEpics = await adapter.queryCells(projectPath, {
+      status: ["open", "in_progress"],
+      type: "epic",
+      limit: 5
+    });
+    if (openEpics.length > 0) {
+      contextLines.push("## Active Epics");
+      for (const epic of openEpics) {
+        const children = await adapter.getEpicChildren(projectPath, epic.id);
+        const completed = children.filter(c => c.status === "closed").length;
+        const inProgress = children.filter(c => c.status === "in_progress");
+        const open = children.filter(c => c.status === "open");
+
+        contextLines.push(`### ${epic.id}: ${epic.title}`);
+        contextLines.push(`Progress: ${completed}/${children.length} completed`);
+
+        if (inProgress.length > 0) {
+          contextLines.push("In progress:");
+          for (const c of inProgress) {
+            contextLines.push(`- ${c.id}: ${c.title}`);
+          }
+        }
+        if (open.length > 0 && open.length <= 5) {
+          contextLines.push("Remaining:");
+          for (const c of open) {
+            contextLines.push(`- ${c.id}: ${c.title}`);
+          }
+        } else if (open.length > 5) {
+          contextLines.push(`Remaining: ${open.length} tasks`);
+        }
+        contextLines.push("");
+      }
+    }
+
+    // Blocked cells (so Claude knows what's waiting)
+    const blockedCells = await adapter.getBlockedCells(projectPath);
+    if (blockedCells.length > 0) {
+      contextLines.push("## Blocked Work");
+      for (const { cell, blockers } of blockedCells.slice(0, 5)) {
+        contextLines.push(`- ${cell.id}: ${cell.title}`);
+        contextLines.push(`  Blocked by: ${blockers.join(", ")}`);
+      }
+      contextLines.push("");
+    }
+
+    // Ready cells (next work available)
+    const readyCell = await adapter.getNextReadyCell(projectPath);
+    if (readyCell) {
+      contextLines.push("## Next Ready Task");
+      contextLines.push(`${readyCell.id}: ${readyCell.title} (P${readyCell.priority})`);
+      contextLines.push("");
+    }
+
+    // Stats
+    const stats = await adapter.getCellsStats(projectPath);
+    contextLines.push("## Hive Stats");
+    contextLines.push(`Open: ${stats.open} | In Progress: ${stats.in_progress} | Blocked: ${stats.blocked} | Closed: ${stats.closed}`);
+
+    writeClaudeHookOutput("PreCompact", contextLines.join("\n"));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Claude hook: end the active session.
+ */
+async function claudeSessionEnd() {
+  try {
+    const input = await readHookInput<ClaudeHookInput>();
+    const projectPath = resolveClaudeProjectPath(input);
+    const swarmMail = await getSwarmMailLibSQL(projectPath);
+    const db = await swarmMail.getDatabase(projectPath);
+    const adapter = createHiveAdapter(db, projectPath);
+
+    await adapter.runMigrations();
+
+    const currentSession = await adapter.getCurrentSession(projectPath);
+    if (!currentSession) return;
+
+    await adapter.endSession(projectPath, currentSession.id, {});
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Claude hook: pre-edit reminder for workers
+ *
+ * Runs BEFORE Edit/Write tool calls. Reminds worker to query hivemind first.
+ * This is a gentle nudge, not a blocker.
+ */
+async function claudePreEdit() {
+  try {
+    const input = await readHookInput<ClaudeHookInput & { tool_name?: string; tool_input?: Record<string, unknown> }>();
+
+    // Only inject reminder if this looks like a worker context
+    // (workers have initialized via swarmmail_init)
+    const projectPath = resolveClaudeProjectPath(input);
+
+    // Check if we've seen hivemind_find in this session
+    // For now, we always remind - tracking will come later
+    const contextLines: string[] = [];
+
+    contextLines.push("**Before this edit**: Did you run `hivemind_find` to check for existing solutions?");
+    contextLines.push("If you haven't queried hivemind yet, consider doing so to avoid re-solving problems.");
+
+    writeClaudeHookOutput("PreToolUse:Edit", contextLines.join("\n"), { suppressOutput: true });
+  } catch (error) {
+    // Non-fatal - don't block the edit
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Claude hook: pre-complete check for workers
+ *
+ * Runs BEFORE swarm_complete. Checks compliance with mandatory steps
+ * and warns if any were skipped.
+ */
+async function claudePreComplete() {
+  try {
+    const input = await readHookInput<ClaudeHookInput & { tool_input?: Record<string, unknown> }>();
+    const projectPath = resolveClaudeProjectPath(input);
+    const contextLines: string[] = [];
+
+    // Check session tracking markers
+    const trackingDir = join(projectPath, ".claude", ".worker-tracking");
+    const sessionId = (input as { session_id?: string }).session_id || "";
+    const sessionDir = join(trackingDir, sessionId.slice(0, 8));
+
+    const mandatoryTools = [
+      { name: "swarmmail_init", label: "Initialize coordination" },
+      { name: "hivemind_find", label: "Query past learnings" },
+    ];
+    const recommendedTools = [
+      { name: "skills_use", label: "Load relevant skills" },
+      { name: "hivemind_store", label: "Store new learnings" },
+    ];
+
+    const missing: string[] = [];
+    const skippedRecommended: string[] = [];
+
+    for (const tool of mandatoryTools) {
+      const markerPath = join(sessionDir, `${tool.name}.marker`);
+      if (!existsSync(markerPath)) {
+        missing.push(tool.label);
+      }
+    }
+
+    for (const tool of recommendedTools) {
+      const markerPath = join(sessionDir, `${tool.name}.marker`);
+      if (!existsSync(markerPath)) {
+        skippedRecommended.push(tool.label);
+      }
+    }
+
+    if (missing.length > 0) {
+      contextLines.push("**MANDATORY STEPS SKIPPED:**");
+      for (const step of missing) {
+        contextLines.push(`  - ${step}`);
+      }
+      contextLines.push("");
+      contextLines.push("These steps are critical for swarm coordination.");
+      contextLines.push("Consider running `hivemind_find` before future completions.");
+    }
+
+    if (skippedRecommended.length > 0 && missing.length === 0) {
+      contextLines.push("**Recommended steps not observed:**");
+      for (const step of skippedRecommended) {
+        contextLines.push(`  - ${step}`);
+      }
+    }
+
+    if (missing.length === 0 && skippedRecommended.length === 0) {
+      contextLines.push("**All mandatory and recommended steps completed!**");
+    }
+
+    // Emit compliance event for analytics
+    try {
+      const swarmMail = await getSwarmMailLibSQL(projectPath);
+      const db = await swarmMail.getDatabase(projectPath);
+
+      await db.execute({
+        sql: `INSERT INTO swarm_events (event_type, project_path, agent_name, epic_id, bead_id, payload, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+        args: [
+          "worker_compliance",
+          projectPath,
+          "worker",
+          "",
+          "",
+          JSON.stringify({
+            session_id: sessionId,
+            mandatory_skipped: missing.length,
+            recommended_skipped: skippedRecommended.length,
+            score: Math.round(((mandatoryTools.length - missing.length) / mandatoryTools.length) * 100),
+          }),
+        ],
+      });
+    } catch {
+      // Non-fatal
+    }
+
+    if (contextLines.length > 0) {
+      writeClaudeHookOutput("PreToolUse:swarm_complete", contextLines.join("\n"), { suppressOutput: missing.length === 0 });
+    }
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Claude hook: post-complete reminder for workers
+ *
+ * Runs AFTER swarm_complete. Reminds to store learnings if any were discovered.
+ */
+async function claudePostComplete() {
+  try {
+    const input = await readHookInput<ClaudeHookInput & { tool_output?: string }>();
+    const contextLines: string[] = [];
+
+    contextLines.push("Task completed. If you discovered anything valuable during this work:");
+    contextLines.push("```");
+    contextLines.push("hivemind_store(");
+    contextLines.push('  information="<what you learned, WHY it matters>",');
+    contextLines.push('  tags="<domain, pattern-type>"');
+    contextLines.push(")");
+    contextLines.push("```");
+    contextLines.push("**The swarm's collective intelligence grows when agents share learnings.**");
+
+    writeClaudeHookOutput("PostToolUse:swarm_complete", contextLines.join("\n"), { suppressOutput: true });
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Track when a mandatory tool is called.
+ *
+ * Creates a session-specific marker file that records tool usage.
+ * These markers are checked at swarm_complete to calculate compliance.
+ */
+async function claudeTrackTool(toolName: string) {
+  if (!toolName) return;
+
+  try {
+    const input = await readHookInput<ClaudeHookInput>();
+    const projectPath = resolveClaudeProjectPath(input);
+
+    // Get or create session tracking directory
+    const trackingDir = join(projectPath, ".claude", ".worker-tracking");
+    const sessionId = (input as { session_id?: string }).session_id || `unknown-${Date.now()}`;
+    const sessionDir = join(trackingDir, sessionId.slice(0, 8)); // Use first 8 chars of session ID
+
+    if (!existsSync(sessionDir)) {
+      mkdirSync(sessionDir, { recursive: true });
+    }
+
+    // Write marker file for this tool
+    const markerPath = join(sessionDir, `${toolName}.marker`);
+    writeFileSync(markerPath, new Date().toISOString());
+
+    // Also emit an event for long-term analytics (non-blocking)
+    try {
+      const swarmMail = await getSwarmMailLibSQL(projectPath);
+      const db = await swarmMail.getDatabase(projectPath);
+
+      await db.execute({
+        sql: `INSERT INTO swarm_events (event_type, project_path, agent_name, epic_id, bead_id, payload, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+        args: [
+          "worker_tool_call",
+          projectPath,
+          "worker", // We don't have agent name in hook context
+          "",
+          "",
+          JSON.stringify({ tool: toolName, session_id: sessionId }),
+        ],
+      });
+    } catch {
+      // Non-fatal - tracking is best-effort
+    }
+  } catch (error) {
+    // Silent failure - don't interrupt the tool call
+    console.error(`[track-tool] ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Check worker compliance - which mandatory tools were called.
+ *
+ * Returns compliance data based on session tracking markers.
+ */
+async function claudeCompliance() {
+  try {
+    const input = await readHookInput<ClaudeHookInput>();
+    const projectPath = resolveClaudeProjectPath(input);
+
+    const trackingDir = join(projectPath, ".claude", ".worker-tracking");
+    const sessionId = (input as { session_id?: string }).session_id || "";
+    const sessionDir = join(trackingDir, sessionId.slice(0, 8));
+
+    const mandatoryTools = ["swarmmail_init", "hivemind_find", "skills_use"];
+    const recommendedTools = ["hivemind_store"];
+
+    const compliance: Record<string, boolean> = {};
+
+    for (const tool of [...mandatoryTools, ...recommendedTools]) {
+      const markerPath = join(sessionDir, `${tool}.marker`);
+      compliance[tool] = existsSync(markerPath);
+    }
+
+    const mandatoryCount = mandatoryTools.filter(t => compliance[t]).length;
+    const score = Math.round((mandatoryCount / mandatoryTools.length) * 100);
+
+    console.log(JSON.stringify({
+      session_id: sessionId,
+      compliance,
+      mandatory_score: score,
+      mandatory_met: mandatoryCount,
+      mandatory_total: mandatoryTools.length,
+      stored_learnings: compliance.hivemind_store,
+    }));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Hot-reload skills by clearing cache and re-scanning directories.
+ * Triggered by Claude Code hook when skill files are modified.
+ */
+async function claudeSkillReload() {
+  try {
+    // Clear the skills cache
+    invalidateSkillsCache();
+
+    // Re-scan skill directories to get updated list
+    const skills = await discoverSkills();
+
+    // Return success with count
+    console.log(JSON.stringify({
+      success: true,
+      reloaded: skills.size,
+      message: `Reloaded ${skills.size} skill(s)`,
+    }));
+  } catch (error) {
+    console.error(JSON.stringify({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
+
+/**
+ * Query worker compliance stats across all sessions.
+ */
+async function showWorkerCompliance() {
+  const projectPath = process.cwd();
+
+  try {
+    // Use shared executeQuery (handles DB connection internally)
+    const toolUsageSql = `SELECT
+      json_extract(payload, '$.tool') as tool,
+      COUNT(*) as count,
+      COUNT(DISTINCT json_extract(payload, '$.session_id')) as sessions
+    FROM swarm_events
+    WHERE event_type = 'worker_tool_call'
+      AND created_at > datetime('now', '-7 days')
+    GROUP BY tool
+    ORDER BY count DESC`;
+
+    const toolResult = await executeQueryCLI(projectPath, toolUsageSql);
+    const rows = toolResult.rows;
+
+    console.log(yellow(BANNER));
+    console.log(cyan("\n Worker Tool Usage (Last 7 Days)\n"));
+
+    if (rows.length === 0) {
+      console.log(dim("No worker tool usage data found."));
+      console.log(dim("Data is collected when workers run with the Claude Code plugin."));
+      return;
+    }
+
+    console.log(dim("Tool                    Calls   Sessions"));
+    console.log(dim("\u2500".repeat(45)));
+
+    for (const row of rows) {
+      const tool = String(row.tool).padEnd(22);
+      const count = String(row.count).padStart(6);
+      const sessions = String(row.sessions).padStart(8);
+      console.log(`${tool} ${count} ${sessions}`);
+    }
+
+    // Calculate compliance rate
+    const hivemindFinds = rows.find(r => r.tool === "hivemind_find");
+    const completesSql = `SELECT COUNT(*) as count FROM swarm_events
+      WHERE event_type = 'worker_completed'
+        AND created_at > datetime('now', '-7 days')`;
+    const completesResult = await executeQueryCLI(projectPath, completesSql);
+
+    const completes = Number(completesResult.rows[0]?.count || 0);
+    const finds = Number(hivemindFinds?.count || 0);
+
+    if (completes > 0) {
+      const rate = Math.round((Math.min(finds, completes) / completes) * 100);
+      console.log(dim("\n\u2500".repeat(45)));
+      console.log(`\n${green("Hivemind compliance rate:")} ${rate}% (${finds} queries / ${completes} completions)`);
+    }
+
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes("no such table")) {
+      console.log(yellow(BANNER));
+      console.log(cyan("\n Worker Tool Usage\n"));
+      console.log(dim("No tracking data yet."));
+      console.log(dim("Compliance tracking starts when workers run with the Claude Code plugin hooks."));
+      console.log(dim("\nThe swarm_events table will be created on first tracked tool call."));
+    } else {
+      console.error("Error fetching compliance data:", msg);
+    }
+  }
+}
+
+// ============================================================================
+// Claude Code Integration - New Stub Handlers
+// ============================================================================
+
+/**
+ * Claude hook: coordinator subagent start.
+ * Initializes coordinator context for subagent spawning.
+ */
+async function claudeCoordinatorStart() {
+  try {
+    const input = await readHookInput<ClaudeHookInput>();
+    const projectPath = resolveClaudeProjectPath(input);
+    writeClaudeHookOutput("SubagentStart:coordinator",
+      `Coordinator initialized for project: ${projectPath}`);
+  } catch (e) {
+    // Non-fatal
+  }
+}
+
+/**
+ * Claude hook: worker subagent start.
+ * Initializes worker context for subagent execution.
+ */
+async function claudeWorkerStart() {
+  try {
+    const input = await readHookInput<ClaudeHookInput>();
+    const projectPath = resolveClaudeProjectPath(input);
+    writeClaudeHookOutput("SubagentStart:worker",
+      `Worker initialized for project: ${projectPath}`);
+  } catch (e) {
+    // Non-fatal
+  }
+}
+
+/**
+ * Claude hook: subagent stop cleanup.
+ */
+async function claudeSubagentStop() {
+  try {
+    await readHookInput<ClaudeHookInput>();
+    // Cleanup - non-fatal
+  } catch (e) {
+    // Silent
+  }
+}
+
+/**
+ * Claude hook: agent stop cleanup.
+ */
+async function claudeAgentStop() {
+  try {
+    await readHookInput<ClaudeHookInput>();
+    // Cleanup - non-fatal
+  } catch (e) {
+    // Silent
+  }
+}
+
+/**
+ * Claude hook: track task events.
+ */
+async function claudeTrackTask() {
+  try {
+    await readHookInput<ClaudeHookInput>();
+    // Track task event - non-fatal
+  } catch (e) {
+    // Silent
+  }
+}
+
+/**
+ * Claude hook: post task update tracking.
+ */
+async function claudePostTaskUpdate() {
+  try {
+    await readHookInput<ClaudeHookInput>();
+    // Post-update tracking - non-fatal
+  } catch (e) {
+    // Silent
+  }
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -6047,6 +7209,9 @@ switch (command) {
     break;
   case "config":
     config();
+    break;
+  case "claude":
+    await claudeCommand();
     break;
   case "serve":
     await serve();
