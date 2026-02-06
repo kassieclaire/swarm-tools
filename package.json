@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "ci:version": "changeset version && bun update",
-    "ci:publish": "for dir in packages/*; do (cd \"$dir\" && bun publish --access public || true); done && changeset tag",
+    "ci:publish": "for dir in packages/*; do (cd \"$dir\" && TARBALL=$(bun pm pack --destination /tmp/pkg-publish 2>&1 | grep '\\.tgz$') && npm publish \"$TARBALL\" --access public && rm -f \"$TARBALL\" || true); done && rm -rf /tmp/pkg-publish 2>/dev/null; changeset tag",
     "test:integration": "bun --filter=opencode-swarm-plugin test:integration",
     "eval:ci": "cd packages/opencode-swarm-plugin && bun run swarm eval run --ci"
   },
