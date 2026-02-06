@@ -1,14 +1,14 @@
 {
   "name": "opencode-swarm-monorepo",
   "private": true,
-  "packageManager": "bun@1.3.4",
+  "packageManager": "bun@1.3.8",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
     "ci:version": "changeset version && bun update",
-    "ci:publish": "for dir in packages/*; do (cd \"$dir\" && TARBALL=$(bun pm pack --destination /tmp/pkg-publish 2>&1 | grep '\\.tgz$') && npm publish \"$TARBALL\" --access public && rm -f \"$TARBALL\" || true); done && rm -rf /tmp/pkg-publish 2>/dev/null; changeset tag",
+    "ci:publish": "bash scripts/ci-publish.sh",
     "test:integration": "bun --filter=opencode-swarm-plugin test:integration",
     "eval:ci": "cd packages/opencode-swarm-plugin && bun run swarm eval run --ci"
   },
