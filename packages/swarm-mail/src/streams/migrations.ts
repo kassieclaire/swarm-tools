@@ -42,7 +42,7 @@
  */
 import type { DatabaseAdapter } from "../types/database.js";
 import { hiveMigrations } from "../hive/migrations.js";
-import { memoryMigrations } from "../memory/migrations.js";
+import { memoryMigrationsLibSQL } from "../memory/migrations.js";
 
 // ============================================================================
 // Types
@@ -398,8 +398,8 @@ export const migrations: Migration[] = [
   },
   // Hive migrations (v7-v8)
   ...hiveMigrations,
-  // Memory migrations (v9+)
-  ...memoryMigrations,
+  // Memory migrations (v9+) - libSQL-specific (F32_BLOB, FTS5, vector_distance_cos)
+  ...memoryMigrationsLibSQL,
 ];
 
 // ============================================================================
@@ -518,7 +518,81 @@ export async function runMigrations(db: DatabaseAdapter): Promise<{
   }
 
   const finalVersion = await getCurrentVersion(db);
+
+  // Self-heal: ensure all expected columns exist on the memories table.
+  // This catches columns that were defined in libsql-schema.ts/Drizzle schema
+  // but never added via a numbered migration (e.g., when the wrong migration
+  // set was used, or when createLibSQLMemorySchema's ALTER TABLE fallback failed).
+  await healMemorySchema(db);
+
   return { applied, current: finalVersion };
+}
+
+/**
+ * Self-heal the memories table schema.
+ *
+ * Checks for columns defined in db/schema/memory.ts that may be missing
+ * from the actual SQLite table. Adds them idempotently via ALTER TABLE.
+ *
+ * This runs after every migration pass, so even databases created through
+ * different code paths (convenience functions, PGlite migration, etc.)
+ * will eventually converge on the correct schema.
+ */
+async function healMemorySchema(db: DatabaseAdapter): Promise<void> {
+  try {
+    // Check if memories table exists at all
+    const tableCheck = await db.query<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='memories'`
+    );
+    if (tableCheck.rows.length === 0) return;
+
+    // Get current columns
+    const columnsResult = await db.query<{ name: string }>(
+      `SELECT name FROM pragma_table_info('memories')`
+    );
+    const existingColumns = new Set(columnsResult.rows.map(r => r.name));
+
+    // Expected columns with their defaults (from db/schema/memory.ts)
+    const expectedColumns: Array<{ name: string; type: string; defaultVal: string }> = [
+      { name: "tags", type: "TEXT", defaultVal: "'[]'" },
+      { name: "updated_at", type: "TEXT", defaultVal: "(datetime('now'))" },
+      { name: "decay_factor", type: "REAL", defaultVal: "1.0" },
+      { name: "access_count", type: "TEXT", defaultVal: "'0'" },
+      { name: "last_accessed", type: "TEXT", defaultVal: "(datetime('now'))" },
+      { name: "category", type: "TEXT", defaultVal: "NULL" },
+      { name: "status", type: "TEXT", defaultVal: "'active'" },
+      { name: "valid_from", type: "TEXT", defaultVal: "NULL" },
+      { name: "valid_until", type: "TEXT", defaultVal: "NULL" },
+      { name: "superseded_by", type: "TEXT", defaultVal: "NULL" },
+      { name: "auto_tags", type: "TEXT", defaultVal: "NULL" },
+      { name: "keywords", type: "TEXT", defaultVal: "NULL" },
+    ];
+
+    let healed = 0;
+    for (const col of expectedColumns) {
+      if (!existingColumns.has(col.name)) {
+        try {
+          const defaultClause = col.defaultVal === "NULL"
+            ? ""
+            : ` DEFAULT ${col.defaultVal}`;
+          await db.exec(
+            `ALTER TABLE memories ADD COLUMN ${col.name} ${col.type}${defaultClause}`
+          );
+          healed++;
+          console.log(`[migrations] healed: added missing column memories.${col.name}`);
+        } catch {
+          // Column might have been added between our check and ALTER — that's fine
+        }
+      }
+    }
+
+    if (healed > 0) {
+      console.log(`[migrations] self-heal: added ${healed} missing column(s) to memories table`);
+    }
+  } catch (error) {
+    // Self-heal is best-effort — don't crash the migration system
+    console.warn("[migrations] self-heal failed (non-fatal):", (error as Error).message);
+  }
 }
 
 /**

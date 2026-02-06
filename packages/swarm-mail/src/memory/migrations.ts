@@ -324,13 +324,40 @@ export const sessionMetadataExtensionLibSQL: Migration = {
 };
 
 /**
+ * Migration v12 (libSQL): Schema convergence marker
+ *
+ * The actual column additions are handled by healMemorySchema() in
+ * streams/migrations.ts, which runs after every migration pass.
+ * This migration exists to:
+ * 1. Record that self-healing was triggered
+ * 2. Bump the schema version so future migrations can depend on it
+ *
+ * Columns added by healMemorySchema (if missing):
+ * tags, updated_at, decay_factor, access_count, last_accessed, category, status
+ */
+export const memorySelfHealColumnsLibSQL: Migration = {
+  version: 12,
+  description: "Schema convergence: self-heal missing columns (tags, updated_at, decay_factor, access_count, last_accessed, category, status)",
+  up: `
+    -- No-op: actual column additions handled by healMemorySchema() post-migration.
+    -- This migration just bumps the version number.
+    SELECT 1;
+  `,
+  down: `
+    -- Cannot remove columns in older SQLite versions
+    SELECT 1;
+  `,
+};
+
+/**
  * Export memory migrations array
  */
 export const memoryMigrations: Migration[] = [memoryMigration];
 export const memoryMigrationsLibSQL: Migration[] = [
   memoryMigrationLibSQL,
   memorySchemaOverhaulLibSQL,
-  sessionMetadataExtensionLibSQL
+  sessionMetadataExtensionLibSQL,
+  memorySelfHealColumnsLibSQL,
 ];
 
 /**
