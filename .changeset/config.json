@@ -6,7 +6,7 @@
   ],
   "commit": false,
   "fixed": [],
-  "linked": [],
+  "linked": [["opencode-swarm-plugin", "claude-code-swarm-plugin"]],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
