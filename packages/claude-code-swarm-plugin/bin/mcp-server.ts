@@ -73,7 +73,7 @@ const TOOL_DEFINITIONS: ToolInfo[] = [
       properties: {
         epic_title: { type: "string", description: "Epic title (required)" },
         epic_description: { type: "string", description: "Epic description" },
-        subtasks: { type: "string", description: "JSON array of subtasks [{title, files?, priority?}]" },
+        subtasks: { type: "array", items: { type: "object" }, description: "Array of subtasks: [{title: string, files?: string[], priority?: number}]" },
         strategy: { type: "string", description: "Decomposition strategy: file-based, feature-based, risk-based" },
       },
       required: ["epic_title", "subtasks"],
@@ -219,7 +219,7 @@ const TOOL_DEFINITIONS: ToolInfo[] = [
     inputSchema: {
       type: "object",
       properties: {
-        to: { type: "string", description: "Recipient agent names (JSON array)" },
+        to: { type: "array", items: { type: "string" }, description: "Recipient agent names (e.g., [\"coordinator\"] or [\"worker-1\", \"worker-2\"])" },
         subject: { type: "string", description: "Message subject (required)" },
         body: { type: "string", description: "Message body (required)" },
         importance: { type: "string", description: "low, normal, high, urgent" },
@@ -234,7 +234,7 @@ const TOOL_DEFINITIONS: ToolInfo[] = [
     inputSchema: {
       type: "object",
       properties: {
-        paths: { type: "string", description: "File paths to reserve (required)" },
+        paths: { type: "array", items: { type: "string" }, description: "File paths to reserve (e.g., [\"src/auth.ts\", \"src/auth.test.ts\"])" },
         reason: { type: "string", description: "Reservation reason" },
         exclusive: { type: "boolean", description: "Exclusive lock" },
         ttl_seconds: { type: "number", description: "Time-to-live in seconds" },
@@ -248,8 +248,8 @@ const TOOL_DEFINITIONS: ToolInfo[] = [
     inputSchema: {
       type: "object",
       properties: {
-        paths: { type: "string", description: "File paths to release (JSON array)" },
-        reservation_ids: { type: "string", description: "Reservation IDs to release (JSON array)" },
+        paths: { type: "array", items: { type: "string" }, description: "File paths to release" },
+        reservation_ids: { type: "array", items: { type: "string" }, description: "Reservation IDs to release" },
       },
     },
   },
@@ -324,7 +324,7 @@ const TOOL_DEFINITIONS: ToolInfo[] = [
         bead_id: { type: "string", description: "Bead/cell ID (required)" },
         epic_id: { type: "string", description: "Epic ID (required)" },
         subtask_title: { type: "string", description: "Subtask title (required)" },
-        files: { type: "string", description: "Files to work on (JSON array, required)" },
+        files: { type: "array", items: { type: "string" }, description: "Files to work on (e.g., [\"src/auth.ts\", \"src/auth.test.ts\"])" },
         subtask_description: { type: "string", description: "Subtask description" },
         project_path: { type: "string", description: "Project path" },
         shared_context: { type: "string", description: "Shared context for worker" },
@@ -341,7 +341,7 @@ const TOOL_DEFINITIONS: ToolInfo[] = [
         project_key: { type: "string", description: "Project key (required)" },
         epic_id: { type: "string", description: "Epic ID (required)" },
         task_id: { type: "string", description: "Task/cell ID (required)" },
-        files_touched: { type: "string", description: "Files touched (JSON array)" },
+        files_touched: { type: "array", items: { type: "string" }, description: "Files that were modified" },
       },
       required: ["project_key", "epic_id", "task_id"],
     },
@@ -374,7 +374,7 @@ const TOOL_DEFINITIONS: ToolInfo[] = [
         status: { type: "string", description: "Status: in_progress, blocked, completed, failed (required)" },
         progress_percent: { type: "number", description: "Progress percentage" },
         message: { type: "string", description: "Status message" },
-        files_touched: { type: "string", description: "Files touched (JSON array)" },
+        files_touched: { type: "array", items: { type: "string" }, description: "Files that were modified" },
       },
       required: ["project_key", "agent_name", "bead_id", "status"],
     },
@@ -390,10 +390,109 @@ const TOOL_DEFINITIONS: ToolInfo[] = [
         bead_id: { type: "string", description: "Bead/cell ID (required)" },
         summary: { type: "string", description: "Work summary (required)" },
         start_time: { type: "number", description: "Start timestamp (required)" },
-        files_touched: { type: "string", description: "Files touched (JSON array)" },
+        files_touched: { type: "array", items: { type: "string" }, description: "Files that were modified" },
         skip_verification: { type: "boolean", description: "Skip verification gate" },
       },
       required: ["project_key", "agent_name", "bead_id", "summary", "start_time"],
+    },
+  },
+
+  // ========== RALPH SUPERVISOR ==========
+  // Claude supervises, Codex executes
+  {
+    name: "ralph_init",
+    description: "Initialize a ralph supervisor project. Creates prd.json and progress.txt for tracking stories.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workdir: { type: "string", description: "Working directory (defaults to project root)" },
+        project_name: { type: "string", description: "Project name (required)" },
+        description: { type: "string", description: "Project description" },
+        use_hive: { type: "boolean", description: "Track stories as hive cells (default: true)" },
+      },
+      required: ["project_name"],
+    },
+  },
+  {
+    name: "ralph_story",
+    description: "Add a story (task) to the ralph project. Stories are discrete units of work that Codex will implement.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workdir: { type: "string", description: "Working directory" },
+        title: { type: "string", description: "Story title (required)" },
+        description: { type: "string", description: "Detailed description of what to implement (required)" },
+        priority: { type: "number", description: "Priority 1-10 (1=highest, default 5)" },
+        validation_command: { type: "string", description: "Command to validate (defaults to npm test)" },
+        acceptance_criteria: { type: "array", items: { type: "string" }, description: "List of acceptance criteria (e.g., [\"Tests pass\", \"Types correct\"])" },
+      },
+      required: ["title", "description"],
+    },
+  },
+  {
+    name: "ralph_iterate",
+    description: "Run a single ralph iteration. Picks the next pending story, spawns Codex to implement it, runs validation, and commits on success.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workdir: { type: "string", description: "Working directory" },
+        model: { type: "string", description: "Codex model to use (default: gpt-5.3-codex)" },
+        sandbox: { type: "string", description: "Sandbox mode: read-only, workspace-write, danger-full-access" },
+        dry_run: { type: "boolean", description: "Don't actually run Codex, just show what would happen" },
+        timeout_ms: { type: "number", description: "Timeout per iteration in ms (default: 600000)" },
+      },
+    },
+  },
+  {
+    name: "ralph_loop",
+    description: "Run the ralph loop until all stories pass or limits are reached. Spawns Codex for each story, validates, commits on success, and continues.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workdir: { type: "string", description: "Working directory" },
+        max_iterations: { type: "number", description: "Maximum iterations (default: 20)" },
+        model: { type: "string", description: "Codex model (default: gpt-5.3-codex)" },
+        sandbox: { type: "string", description: "Sandbox mode" },
+        stop_on_failure: { type: "boolean", description: "Stop on first validation failure" },
+        auto_commit: { type: "boolean", description: "Auto-commit on success (default: true)" },
+        sync: { type: "boolean", description: "Run synchronously (default: false)" },
+      },
+    },
+  },
+  {
+    name: "ralph_status",
+    description: "Get the status of a ralph project or running loop job.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workdir: { type: "string", description: "Working directory" },
+        job_id: { type: "string", description: "Specific job ID to check" },
+      },
+    },
+  },
+  {
+    name: "ralph_cancel",
+    description: "Cancel a running ralph loop.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        job_id: { type: "string", description: "Job ID to cancel (required)" },
+      },
+      required: ["job_id"],
+    },
+  },
+  {
+    name: "ralph_review",
+    description: "Review a completed story. Approve to keep it passed, or reject with feedback to retry.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workdir: { type: "string", description: "Working directory" },
+        story_id: { type: "string", description: "Story ID to review (required)" },
+        approve: { type: "boolean", description: "Whether to approve the work (required)" },
+        feedback: { type: "string", description: "Feedback if rejecting" },
+      },
+      required: ["story_id", "approve"],
     },
   },
 ];
@@ -434,6 +533,10 @@ function jsonSchemaToZod(schema: Record<string, unknown>): z.ZodTypeAny {
       case "array":
         if (prop.items?.type === "object") {
           fieldSchema = z.array(jsonSchemaToZod(prop.items as Record<string, unknown>));
+        } else if (prop.items?.type === "string") {
+          fieldSchema = z.array(z.string());
+        } else if (prop.items?.type === "number") {
+          fieldSchema = z.array(z.number());
         } else {
           fieldSchema = z.array(z.unknown());
         }

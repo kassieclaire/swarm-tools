@@ -1,15 +1,9 @@
 ---
 name: always-on-guidance
-description: Always-on rule-oriented guidance for claude-plugin agents. Use to align behavior, tool usage, and model-specific defaults (GPT-5.2-code vs Opus 4.5) while avoiding deprecated bd/cass references.
-tags:
-  - guidance
-  - rules
-  - models
-tools:
-  - "*"
-related_skills:
-  - swarm-coordination
-  - testing-patterns
+description: |
+  Always-on rule-oriented guidance for claude-plugin agents. Use to align behavior,
+  tool usage, and model-specific defaults while avoiding deprecated bd/cass references.
+  Related skills: swarm-coordination, testing-patterns.
 ---
 
 # Always-On Guidance

@@ -1,5 +1,17 @@
 # opencode-swarm-plugin
 
+## 0.63.0
+
+### Minor Changes
+
+- feat: improve swarm tool schemas and documentation
+
+  - Fix MCP array parameter schemas (files, paths, to, files_touched, etc.) - use proper JSON Schema array types instead of string with "JSON array" description
+  - Add explicit spawning examples to swarm-coordination skills showing correct swarm_spawn_subtask format
+  - Add ready_for_review status to ralph story schema for proper review workflow
+  - Fix skill frontmatter to use only name and description fields per skill-creator spec
+  - Remove release skill from plugin distribution (project-specific only)
+
 ## 0.62.2
 
 ### Patch Changes

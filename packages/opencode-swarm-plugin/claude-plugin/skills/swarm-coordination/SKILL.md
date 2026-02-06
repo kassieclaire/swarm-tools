@@ -1,16 +1,9 @@
 ---
 name: swarm-coordination
-description: Multi-agent coordination patterns for OpenCode swarm workflows. Use when work benefits from parallelization or coordination.
-tags:
-  - swarm
-  - multi-agent
-  - coordination
-tools:
-  - "*"
-related_skills:
-  - testing-patterns
-  - system-design
-  - cli-builder
+description: |
+  Multi-agent coordination patterns for OpenCode swarm workflows. Use when work
+  benefits from parallelization or coordination. Covers: decomposition, worker
+  spawning, file reservations, progress tracking, and review loops.
 ---
 
 # Swarm Coordination
@@ -99,6 +92,98 @@ Coordinators never reserve files.
 ## Progress Reporting
 
 Use `swarm_progress` at 25%, 50%, and 75% completion to trigger auto-checkpoints.
+
+## Spawning Workers (CRITICAL - Read This)
+
+### Step 1: Prepare the subtask with swarm_spawn_subtask
+
+```typescript
+const spawnResult = await swarm_spawn_subtask({
+  bead_id: "cell-abc123",           // The hive cell ID for this subtask
+  epic_id: "epic-xyz789",           // Parent epic ID
+  subtask_title: "Add logging utilities",
+  subtask_description: "Create a logger module with structured logging support",
+  files: ["src/utils/logger.ts", "src/utils/logger.test.ts"],  // Array of strings, NOT a JSON string
+  shared_context: "This epic is adding observability. Other workers are adding metrics and tracing.",
+  project_path: "/absolute/path/to/project"  // Required for tracking
+});
+```
+
+### Step 2: Spawn the worker with Task tool
+
+```typescript
+// Parse the result to get the prompt
+const { prompt, recommended_model } = JSON.parse(spawnResult);
+
+// Spawn the worker
+await Task({
+  subagent_type: "swarm:worker",
+  prompt: prompt,
+  model: recommended_model  // Optional: use the auto-selected model
+});
+```
+
+### Common Mistakes
+
+**WRONG - files as JSON string:**
+```typescript
+files: '["src/auth.ts"]'  // DON'T do this
+```
+
+**CORRECT - files as proper array:**
+```typescript
+files: ["src/auth.ts", "src/auth.test.ts"]  // Do this
+```
+
+**WRONG - missing project_path:**
+```typescript
+swarm_spawn_subtask({
+  bead_id: "...",
+  epic_id: "...",
+  // No project_path - worker can't initialize tracking!
+})
+```
+
+**CORRECT - always include project_path:**
+```typescript
+swarm_spawn_subtask({
+  bead_id: "...",
+  epic_id: "...",
+  project_path: "/Users/joel/myproject"  // Required!
+})
+```
+
+## Parallel vs Sequential Spawning
+
+### Parallel (independent tasks)
+
+Send multiple Task calls in a single message:
+
+```typescript
+// All in one message - runs in parallel
+Task({ subagent_type: "swarm:worker", prompt: prompt1 })
+Task({ subagent_type: "swarm:worker", prompt: prompt2 })
+Task({ subagent_type: "swarm:worker", prompt: prompt3 })
+```
+
+### Sequential (dependent tasks)
+
+Await each before spawning next:
+
+```typescript
+const result1 = await Task({ subagent_type: "swarm:worker", prompt: prompt1 });
+// Review result1...
+const result2 = await Task({ subagent_type: "swarm:worker", prompt: prompt2 });
+```
+
+## Story Status Flow
+
+Status transitions should flow:
+1. **Coordinator** sets story to `in_progress` when spawning worker
+2. **Worker** completes work and sets to `ready_for_review`
+3. **Coordinator** reviews and sets to `passed` or `failed`
+
+Workers do NOT set final status - that's the coordinator's job after review.
 
 ## Skill Loading Guidance
 
